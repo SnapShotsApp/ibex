@@ -8,6 +8,9 @@ You'll need to have Go on your system. Something like `brew install go` should d
 
 You'll also need `go-bindata` to package up the resources: `go get -u github.com/jteeuwen/go-bindata/...`
 
+For dependency management, we use `godep`: `go get github.com/tools/godep`. And then run `godep get`
+in the repo directory.
+
 Then just run `rake`.
 
 Developing
