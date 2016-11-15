@@ -118,3 +118,5 @@ Temporary Items
 .apdisk
 
 .envrc
+bindata.go
+ibex
