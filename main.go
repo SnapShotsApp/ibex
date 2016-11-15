@@ -1,49 +1,23 @@
 package main
 
 import (
-	"database/sql"
-	"io"
 	"log"
 	"os"
-
-	_ "github.com/lib/pq"
 )
 
 func main() {
-	connStr := os.Getenv("DATABASE_URL")
+	var configFile string
 
-	if len(connStr) == 0 {
-		log.Fatal("No database URL found in environment")
+	if len(os.Args) < 2 {
+		configFile = "/etc/ibex.json"
+	} else {
+		configFile = os.Args[1]
 	}
 
-	db, err := sql.Open("postgres", connStr)
+	config, err := LoadConfig(configFile)
 	handleErr(err)
+	log.Printf("Loaded config from %s", configFile)
+	log.Printf("Found %d versions: %s", len(config.Versions), config.VersionNames())
 
-	rows, err := db.Query("SELECT id, attachment FROM pictures WHERE id = $1", 457)
-	handleErr(err)
-	defer closeQuietly(rows)
-
-	for rows.Next() {
-		var id int
-		var attachment string
-
-		err = rows.Scan(&id, &attachment)
-		handleErr(err)
-
-		log.Printf("%d: %s", id, attachment)
-	}
-}
-
-func closeQuietly(handle io.Closer) {
-	err := handle.Close()
-	if err != nil {
-		log.Printf("Warning: %s", err)
-	}
-}
-
-func handleErr(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
-
+	Start(config)
 }
