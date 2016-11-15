@@ -12,6 +12,11 @@
 			"ImportPath": "github.com/lib/pq/oid",
 			"Comment": "go1.0-cutoff-127-gd8eeeb8",
 			"Rev": "d8eeeb8bae8896dd8e1b7e514ab0d396c4f12a1b"
+		},
+		{
+			"ImportPath": "github.com/nleof/goyesql",
+			"Comment": "v1.0.0",
+			"Rev": "11d8984770c87d35a00c9254bd1c363d41a6774f"
 		}
 	]
 }
