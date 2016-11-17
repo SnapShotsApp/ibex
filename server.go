@@ -75,7 +75,6 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	log.Printf("Attempting proxy for %v", version)
 	proxy := h.imagizerURL(version, parts)
 	resp, err := http.Get(proxy.String())
 	defer closeQuietly(resp.Body)
@@ -123,8 +122,6 @@ func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[s
 	retURL.Host = imagizerHost.Host
 	retURL.Path = h.pathForImage(parts)
 	retURL.RawQuery = vals.Encode()
-
-	log.Printf("Proxying to %v", retURL)
 
 	return retURL
 }
