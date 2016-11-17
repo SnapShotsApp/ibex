@@ -1,18 +1,27 @@
 require 'rake/clean'
 
 CLEAN << 'bindata.go'
-CLEAN << 'ibex'
+CLEAN << 'build'
+
+SRC = FileList['bindata.go', '*.go', 'Godeps/*', 'vendor/**/*']
+
+directory 'build'
 
 file 'bindata.go' => FileList['resources/*'] do
   sh 'go-bindata resources/'
 end
 
-file 'ibex' => FileList['bindata.go', '*.go', 'Godeps/*', 'vendor/**/*'] do
-  sh 'go build .'
+file 'ibex-osx' => SRC do
+  sh({ 'GOOS' => 'darwin' }, 'go build -o build/ibex-osx -v .')
 end
 
-task default: 'ibex'
+file 'ibex-linux' => SRC do
+  sh({ 'GOOS' => 'linux' }, 'go build -o build/ibex-linux -v .')
+end
 
-task run: 'ibex' do
-  sh './ibex', 'resources/config.json'
+task all: ['ibex-osx', 'ibex-linux']
+task default: :all
+
+task run: 'ibex-osx' do
+  sh './build/ibex', 'resources/config.json'
 end
