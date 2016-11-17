@@ -12,3 +12,7 @@ file 'ibex' => FileList['bindata.go', '*.go', 'Godeps/*', 'vendor/**/*'] do
 end
 
 task default: 'ibex'
+
+task run: 'ibex' do
+  sh './ibex', 'resources/config.json'
+end

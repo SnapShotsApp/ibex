@@ -2,19 +2,20 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"regexp"
 	"strconv"
 )
 
-const re = `(?i)uploads/(?P<env>\w+)/picture/attachment/(?P<id>\d+)/(?P<name>\w+)$`
+const re = `(?i)uploads/(?P<env>\w+)/(?P<username>\w+)?/?picture/attachment/(?P<id>\d+)/(?P<name>\w+)$`
 const watermarkPathFmt = "%s/uploads/%s/photographer_info/picture/%d/%s"
 const picturePathFmt = "%s/uploads/%s/picture/attachment/%d/%s"
 
 var pathMatcher *regexp.Regexp
+var imagizerHost *url.URL
 
 type imagizerHandler struct {
 	config *Config
@@ -28,6 +29,9 @@ func init() {
 // Start initializes and then starts the HTTP server
 func Start(c *Config) {
 	db, err := NewDB(c)
+	handleErr(err)
+
+	imagizerHost, err = url.Parse(c.ImagizerHost)
 	handleErr(err)
 
 	handler := imagizerHandler{
@@ -47,6 +51,7 @@ func Start(c *Config) {
 
 func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if !pathMatcher.MatchString(req.URL.Path) {
+		log.Printf("Malformed path %s", req.URL.Path)
 		http.NotFound(w, req)
 		return
 	}
@@ -55,6 +60,7 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	version, ok := h.config.versionsByName[parts["name"]]
 	if !ok {
+		log.Printf("Version not found with name %s", parts["name"])
 		http.NotFound(w, req)
 		return
 	}
@@ -64,46 +70,63 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	pic := h.db.loadPicture(pictureID)
 	if pic.eventID == 0 {
+		log.Printf("Picture not found for ID %d", pictureID)
 		http.NotFound(w, req)
 		return
 	}
 
-	proxy := &httputil.ReverseProxy{
-		Director: h.proxyToImagizer(version, parts),
-	}
+	log.Printf("Attempting proxy for %v", version)
+	proxy := h.imagizerURL(version, parts)
+	resp, err := http.Get(proxy.String())
+	defer closeQuietly(resp.Body)
+	handleErr(err)
 
-	proxy.ServeHTTP(w, req)
+	_, err = io.Copy(w, resp.Body)
+	handleErr(err)
 }
 
-func (h imagizerHandler) proxyToImagizer(version map[string]interface{}, parts map[string]string) func(*http.Request) {
+func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[string]string) url.URL {
 	vals := url.Values{}
 	pictureID, err := strconv.Atoi(parts["id"])
 	handleErr(err)
 
 	for key, val := range version {
-		if key == "watermark" && h.isPhotographerImage(pictureID) {
+		if key == "watermark" && val == true && h.isPhotographerImage(pictureID) {
 			vals.Add("mark", h.getWatermarkURL(pictureID, parts["env"]))
-			vals.Add("mark_scale", "75")
+			vals.Add("mark_scale", "15")
 			vals.Add("mark_pos", "bottom,right")
 			vals.Add("mark_offset", "3")
 			vals.Add("mark_alpha", "70")
 			continue
 		}
 
-		vals.Add(key, val.(string))
+		if key == "function_name" || key == "name" || key == "only_shrink_larger" {
+			continue
+		}
+
+		switch val := val.(type) {
+		default:
+			log.Fatalf("Unexpected type %T for %v", val, val)
+		case string:
+			vals.Add(key, val)
+		case int:
+			vals.Add(key, strconv.Itoa(val))
+		case float64:
+			vals.Add(key, strconv.Itoa(int(val)))
+		case bool:
+			vals.Add(key, fmt.Sprintf("%t", val))
+		}
 	}
 
-	return func(req *http.Request) {
-		imagizerHost, err := url.Parse(h.config.ImagizerHost)
-		handleErr(err)
+	retURL := url.URL{}
+	retURL.Scheme = imagizerHost.Scheme
+	retURL.Host = imagizerHost.Host
+	retURL.Path = h.pathForImage(parts)
+	retURL.RawQuery = vals.Encode()
 
-		req.URL.Scheme = imagizerHost.Scheme
-		req.URL.Host = imagizerHost.Host
-		req.URL.Path = h.pathForImage(parts)
-		req.URL.RawQuery = vals.Encode()
+	log.Printf("Proxying to %v", retURL)
 
-		log.Printf("Proxying to %s", req.URL.String())
-	}
+	return retURL
 }
 
 func (h imagizerHandler) isPhotographerImage(id int) bool {
@@ -131,8 +154,16 @@ func (h imagizerHandler) pathForImage(parts map[string]string) string {
 	pic := h.db.loadPicture(pictureID)
 	env, _ := parts["env"]
 
+	var envAndUsername string
+
+	if env == "development" {
+		envAndUsername = fmt.Sprintf("%s/%s", env, parts["username"])
+	} else {
+		envAndUsername = env
+	}
+
 	return fmt.Sprintf(picturePathFmt,
-		BucketNames[env], env, pictureID, pic.attachment)
+		BucketNames[env], envAndUsername, pictureID, pic.attachment)
 }
 
 func extractPathPartsToMap(path string) map[string]string {

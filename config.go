@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 )
 
 type versionProperties map[string]map[string]interface{}
@@ -18,8 +19,10 @@ var BucketNames = map[string]string{
 
 // Version contains a single picture version from config
 type Version struct {
-	Name       string                 `json:"name"`
-	Properties map[string]interface{} `json:"properties"`
+	Name         string                 `json:"name"`
+	FunctionName string                 `json:"function_name"`
+	Watermark    bool                   `json:"watermark"`
+	Params       map[string]interface{} `json:"params"`
 }
 
 // Config loads and contains configs from the json file
@@ -65,7 +68,7 @@ func (c *Config) VersionNames() []string {
 	names := make([]string, len(c.Versions))
 
 	for i, v := range c.Versions {
-		names[i] = v.Name
+		names[i] = strings.TrimLeft(v.Name, ":")
 	}
 
 	return names
@@ -75,7 +78,14 @@ func (c Config) getVersionsByName() versionProperties {
 	mp := make(versionProperties)
 
 	for _, v := range c.Versions {
-		mp[v.Name] = v.Properties
+		mmp := make(map[string]interface{})
+		mmp["function_name"] = v.FunctionName
+		mmp["watermark"] = v.Watermark
+		for k, vv := range v.Params {
+			mmp[k] = vv
+		}
+
+		mp[strings.TrimLeft(v.Name, ":")] = mmp
 	}
 
 	return mp

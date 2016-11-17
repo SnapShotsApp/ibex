@@ -2,25 +2,87 @@
     "database_url": "postgres://snapshots:password@localhost:5432/snapshots_dev?sslmode=disable",
     "bind_port": 8901,
     "imagizer_host": "http://54.161.29.66",
-    "cdn_host": "https://d1u4obwmihhhbt.cloudfront.net",
+    "cdn_host": "https://s3.amazonaws.com",
     "versions": [
         {
-            "name": "large",
-            "properties": {
-                "width": "640",
-                "height": "960",
-				        "quality": "75"
-			      }
-		    },
-        {
-            "name": "large_watermark",
-            "properties": {
-                "width": "640",
-                "height": "960",
-				        "quality": "75",
-                "watermark": true
-            }
-        }
-	  ]
+            "function_name": "resize_to_fill",
+            "params": {
+                "width": 360,
+                "height": 360
+            },
+            "name": ":thumb",
+            "watermark": false
+        }, {
+            "function_name": "resize_to_fill",
+            "params": {
+                "width": 360,
+                "height": 360
+            },
+            "name": ":thumb_watermarked",
+            "watermark": true
+        }, {
+            "function_name": "resize_to_fill",
+            "params": {
+                "width": 175,
+                "height": 125
+            },
+            "name": ":gallery_thumb",
+            "watermark": false
+        }, {
+            "function_name": "resize_to_fill",
+            "params": {
+                "width": 350,
+                "height": 250
+            },
+            "name": ":gallery_thumb_2x",
+            "watermark": false
+        }, {
+            "function_name": "resize_to_fit",
+            "params": {
+                "width": 1600,
+                "only_shrink_larger": true,
+                "height": 2400
+            },
+            "name": ":x_large",
+            "watermark": false
+        }, {
+            "function_name": "resize_to_fit",
+            "params": {
+                "width": 1600,
+                "only_shrink_larger": true,
+                "height": 2400
+            },
+            "name": ":x_large_watermarked",
+            "watermark": true
+        }, {
+            "params": {
+                "width": 640,
+                "only_shrink_larger": true,
+                "height": 960
+            },
+            "function_name": "resize_to_fit",
+            "quality": 60,
+            "name": ":large",
+            "watermark": false
+        }, {
+            "params": {
+                "width": 640,
+                "only_shrink_larger": true,
+                "height": 960
+            },
+            "function_name": "resize_to_fit",
+            "quality": 60,
+            "name": ":large_watermarked",
+            "watermark": true
+        }, {
+            "params": {
+                "width": 600,
+                "only_shrink_larger": true,
+                "height": 315
+            },
+            "function_name": "resize_to_fill",
+            "quality": 60,
+            "name": ":fb_watermarked",
+            "watermark": true
+        }]
 }
-
