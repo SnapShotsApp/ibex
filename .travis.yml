@@ -6,7 +6,7 @@ sudo: required
 services:
   - docker
 
-install:
+before_install:
   - go get github.com/jteeuwen/go-bindata/...
 
 before_script:
