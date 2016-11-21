@@ -17,6 +17,12 @@ create table if not exists photographer_infos(
 );
 
 insert into pictures values(1, 1, 1, 'test_pic.jpg');
+insert into pictures values(2, 2, 1, 'guest_test_pic.jpg');
+
 insert into events values(1, 1);
+insert into events values(2, 3);
+
 insert into photographer_infos values(1, 1, 'test_watermark.jpg');
+insert into photographer_infos values(2, 3, 'extra_test_watermark.jpg');
+insert into photographer_infos values(3, 4, null);
 

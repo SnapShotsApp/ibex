@@ -78,7 +78,7 @@ end
 desc 'Runs all tests'
 task test: 'bindata.go' do
   wait_for_database!
-  sh 'go', 'test'
+  sh 'go', 'test', '-v'
 end
 
 desc 'Prepends the Apache License header comment to all sources'

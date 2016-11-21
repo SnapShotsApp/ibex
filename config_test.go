@@ -1,23 +1,10 @@
 package main
 
 import (
-	"path"
 	"reflect"
 	"sort"
 	"testing"
 )
-
-func load(t *testing.T) *Config {
-	p := path.Join("test_resources", "config.json")
-	config, err := LoadConfig(p)
-
-	if err != nil {
-		t.Errorf("Error when loading config json: %s", err)
-	}
-
-	return config
-
-}
 
 func TestLoading(t *testing.T) {
 	config := load(t)
