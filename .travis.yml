@@ -11,6 +11,6 @@ install:
 
 before_script:
   - docker-compose build
-  - docker-compose start
+  - docker-compose up -d
 
 script: rake test
