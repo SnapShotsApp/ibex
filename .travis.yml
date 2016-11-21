@@ -4,15 +4,15 @@ language: go
 sudo: required
 
 services:
-- docker
+  - docker
 
 before_install:
-- go get github.com/jteeuwen/go-bindata/...
-- go-bindata resources/
+  - go get github.com/jteeuwen/go-bindata/...
+  - go-bindata resources/
 
 before_script:
-- docker-compose build
-- docker-compose up -d
+  - docker-compose build
+  - docker-compose up -d
 
 script:
   - rake test
