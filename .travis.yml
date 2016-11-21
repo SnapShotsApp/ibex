@@ -4,14 +4,27 @@ language: go
 sudo: required
 
 services:
-  - docker
+- docker
 
 before_install:
-  - go get github.com/jteeuwen/go-bindata/...
-  - go-bindata resources/
+- go get github.com/jteeuwen/go-bindata/...
+- go-bindata resources/
 
 before_script:
-  - docker-compose build
-  - docker-compose up -d
+- docker-compose build
+- docker-compose up -d
 
-script: rake test
+script:
+  - rake test
+  - rake all
+
+deploy:
+  provider: releases
+  skip_cleanup: true
+  api_key:
+    secure: i0HQNtZRmRQPWr44s7wY8Z+mmoIN7VhdauC2I1W2sx09GkUpwHOzU7C66urGJumC9uuSXTrRZvWtDcKdXddVfVfvG900EElASZOAfqHZW1yQKgpJ13Ys1a6Q4QtEN0J7H4ws1eAWsOJgB8bk7ET/pDi7vErLB20TPSn0zEt8sI31Eyzmc/ASbw34CbZ6yHbLZQq62xdDmNjoffc5XKbawDZYtlSGDd/O5XsqD9l3XkJwdLAbCXZIc5vPTjSM/4mMV7xklUdivb41wJUCL8diYI+LCcUIVifVPrLZ45pc6bTor/qN79yjWjbiGJdSLoYf8Ww4YMFr671pTPVM9us1UydMguzdslUdiFvxkciDHIcCrgQNvcwQjeUBmarPhMySrp1fVKLbzs9c3nioR+Gkbm3xf4cQMqdHBe9i419qczWtL+7t7U2oC+F41IpeGoTVUTCvZ3a4o8ykGAq693M5YsE6zpSszFWgz6dQLxapao22c1/btgW5NjDbGun0SVc+MeAUdXDM17VVxNFIrgEIrP1jHTwVy7CtkN5mWRs6IHF6T7T6I4tvwhmtIWN4OFDF2H1V101Yq+rEwtM68whrKD8oAX3R+1Dz8z16ZTIuvBL3eFp3dFICxB/kUPAHdGw/2pAoBd1wZVm5uwL3duexmej2iEtDRexBKJZmvwtgco4=
+  file:
+    - build/ibex-linux
+    - build/ibex-osx
+  on:
+    tags: true
