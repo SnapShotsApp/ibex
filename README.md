@@ -1,4 +1,4 @@
-Ibex
+Ibex [![Build Status](https://travis-ci.org/SnapShotsApp/ibex.svg?branch=master)](https://travis-ci.org/SnapShotsApp/ibex)
 ====
 ![Ibex](logo.png)
 
