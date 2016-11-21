@@ -164,7 +164,7 @@ func (h imagizerHandler) getWatermarkURL(id int, env string) string {
 	var watermark string
 
 	if pi.picture.Valid {
-		watermark = fmt.Sprintf(watermarkPathFmt, h.config.CDNHost, env, id, pi.picture)
+		watermark = fmt.Sprintf(watermarkPathFmt, h.config.CDNHost, env, id, pi.picture.String)
 	} else {
 		watermark = "https://snapshots.com/images/icon.png"
 	}
