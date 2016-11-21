@@ -23,5 +23,8 @@ task all: ['ibex-osx', 'ibex-linux']
 task default: :all
 
 task run: 'ibex-osx' do
-  sh './build/ibex', 'resources/config.json'
+  cmd = ['./build/ibex-osx']
+  cmd << '--debug' if ENV['DEBUG']
+
+  sh(*cmd, 'resources/config.json')
 end

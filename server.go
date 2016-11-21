@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -44,33 +43,35 @@ func Start(c *Config) {
 		Handler: handler,
 	}
 
-	log.Printf("Listening on %s", s.Addr)
+	Info("Listening on %s", s.Addr)
 	err = s.ListenAndServe()
 	handleErr(err)
 }
 
 func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if !pathMatcher.MatchString(req.URL.Path) {
-		log.Printf("Malformed path %s", req.URL.Path)
+		Warn("Malformed path %s", req.URL.Path)
 		http.NotFound(w, req)
 		return
 	}
 
 	parts := extractPathPartsToMap(req.URL.Path)
+	Debug("URL Parts: %v", parts)
 
 	version, ok := h.config.versionsByName[parts["name"]]
 	if !ok {
-		log.Printf("Version not found with name %s", parts["name"])
+		Warn("Version not found with name %s", parts["name"])
 		http.NotFound(w, req)
 		return
 	}
+	Debug("Version found: %v", version)
 
 	pictureID, err := strconv.Atoi(parts["id"])
 	handleErr(err)
 
 	pic := h.db.loadPicture(pictureID)
 	if pic.eventID == 0 {
-		log.Printf("Picture not found for ID %d", pictureID)
+		Warn("Picture not found for ID %d", pictureID)
 		http.NotFound(w, req)
 		return
 	}
@@ -79,6 +80,8 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	resp, err := http.Get(proxy.String())
 	defer closeQuietly(resp.Body)
 	handleErr(err)
+
+	Debug("Imagizer response: %v", resp)
 
 	_, err = io.Copy(w, resp.Body)
 	handleErr(err)
@@ -90,12 +93,15 @@ func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[s
 	handleErr(err)
 
 	for key, val := range version {
-		if key == "watermark" && val == true && h.isPhotographerImage(pictureID) {
-			vals.Add("mark", h.getWatermarkURL(pictureID, parts["env"]))
-			vals.Add("mark_scale", "15")
-			vals.Add("mark_pos", "bottom,right")
-			vals.Add("mark_offset", "3")
-			vals.Add("mark_alpha", "70")
+		if key == "watermark" {
+			if val == true && h.isPhotographerImage(pictureID) {
+				vals.Add("mark", h.getWatermarkURL(pictureID, parts["env"]))
+				vals.Add("mark_scale", "15")
+				vals.Add("mark_pos", "bottom,right")
+				vals.Add("mark_offset", "3")
+				vals.Add("mark_alpha", "70")
+			}
+
 			continue
 		}
 
@@ -105,7 +111,7 @@ func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[s
 
 		switch val := val.(type) {
 		default:
-			log.Fatalf("Unexpected type %T for %v", val, val)
+			Fatal("Unexpected type %T for %v", val, val)
 		case string:
 			vals.Add(key, val)
 		case int:
@@ -123,6 +129,7 @@ func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[s
 	retURL.Path = h.pathForImage(parts)
 	retURL.RawQuery = vals.Encode()
 
+	Debug("Imagizer URL: %s", retURL.String())
 	return retURL
 }
 
@@ -130,18 +137,25 @@ func (h imagizerHandler) isPhotographerImage(id int) bool {
 	pic := h.db.loadPicture(id)
 	ev := h.db.loadEvent(pic.eventID)
 
-	return pic.userID == ev.ownerID
+	is := pic.userID == ev.ownerID
+	Debug("is photographer image? %v", is)
+	return is
 }
 
 func (h imagizerHandler) getWatermarkURL(id int, env string) string {
 	pic := h.db.loadPicture(id)
 	pi := h.db.loadPhotographerInfo(pic.userID)
 
+	var watermark string
+
 	if pi.picture.Valid {
-		return fmt.Sprintf(watermarkPathFmt, h.config.CDNHost, env, id, pi.picture)
+		watermark = fmt.Sprintf(watermarkPathFmt, h.config.CDNHost, env, id, pi.picture)
+	} else {
+		watermark = "https://snapshots.com/images/icon.png"
 	}
 
-	return "https://snapshots.com/images/icon.png"
+	Debug("Watermark URL: %s", watermark)
+	return watermark
 }
 
 func (h imagizerHandler) pathForImage(parts map[string]string) string {
@@ -159,8 +173,10 @@ func (h imagizerHandler) pathForImage(parts map[string]string) string {
 		envAndUsername = env
 	}
 
-	return fmt.Sprintf(picturePathFmt,
+	path := fmt.Sprintf(picturePathFmt,
 		BucketNames[env], envAndUsername, pictureID, pic.attachment)
+	Debug("Path for image: %s", path)
+	return path
 }
 
 func extractPathPartsToMap(path string) map[string]string {

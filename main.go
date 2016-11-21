@@ -1,23 +1,33 @@
 package main
 
 import (
-	"log"
-	"os"
+	"flag"
 )
 
-func main() {
-	var configFile string
+var (
+	debugLogEnabled bool
+	configFile      string
+)
 
-	if len(os.Args) < 2 {
+func init() {
+	flag.BoolVar(&debugLogEnabled, "debug", false, "enable verbose debug logging")
+}
+
+func main() {
+	flag.Parse()
+
+	configFile = flag.Arg(0)
+	if len(configFile) == 0 {
 		configFile = "/etc/ibex.json"
-	} else {
-		configFile = os.Args[1]
 	}
+
+	Debug("Debug logging enabled")
 
 	config, err := LoadConfig(configFile)
 	handleErr(err)
-	log.Printf("Loaded config from %s", configFile)
-	log.Printf("Found %d versions: %s", len(config.Versions), config.VersionNames())
+
+	Info("Loaded config from %s", configFile)
+	Info("Found %d versions: %s", len(config.Versions), config.VersionNames())
 
 	Start(config)
 }

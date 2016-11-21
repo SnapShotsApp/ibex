@@ -32,6 +32,7 @@ type Config struct {
 	Versions       []Version `json:"versions"`
 	ImagizerHost   string    `json:"imagizer_host"`
 	CDNHost        string    `json:"cdn_host"`
+	BucketName     string    `json:"bucket_name"`
 	versionsByName versionProperties
 }
 
