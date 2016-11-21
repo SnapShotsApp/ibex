@@ -22,6 +22,34 @@ LICENSE_HEADER = %{
  */
 }.strip.freeze
 
+def db_ready?
+  require 'open3'
+
+  _, status = Open3.capture2e(
+    'psql',
+    'postgres://gotest:gotest@localhost:9988/gotest',
+    '-c', 'select 1', '2>/dev/null'
+  )
+
+  status.success?
+end
+
+def wait_for_database!
+  require 'timeout'
+
+  print 'Waiting for DB'
+  Timeout.timeout(10) do
+    loop do
+      break if db_ready?
+
+      print '.'
+      sleep 1
+    end
+  end
+
+  puts ' Ready'
+end
+
 directory 'build'
 
 file 'bindata.go' => FileList['resources/*'] do
@@ -49,6 +77,7 @@ end
 
 desc 'Runs all tests'
 task test: 'bindata.go' do
+  wait_for_database!
   sh 'go', 'test'
 end
 
