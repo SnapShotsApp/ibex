@@ -1,5 +1,7 @@
 Ibex
 ====
+![Ibex](logo.png)
+
 A custom reverse-proxy for Imagizer.
 
 Building
