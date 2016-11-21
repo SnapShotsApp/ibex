@@ -1,0 +1,7 @@
+---
+version: "2"
+services:
+  postgres:
+    build: ./test_resources
+    ports:
+      - "9988:5432"

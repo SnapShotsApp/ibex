@@ -1,0 +1,34 @@
+{
+    "database_url": "postgres://gotest:gotest@localhost:9988/gotest?sslmode=disable",
+    "bind_port": 192048,
+    "imagizer_host": "http://imagizer.test",
+    "cdn_host": "https://snapshots.test",
+    "bucket_name": "test-bucket",
+    "versions": [
+        {
+            "function_name": "resize_to_fill",
+            "params": {
+                "width": 360,
+                "height": 360
+            },
+            "name": ":thumb",
+            "watermark": false
+        }, {
+            "function_name": "resize_to_fill",
+            "params": {
+                "width": 360,
+                "height": 360
+            },
+            "name": ":thumb_watermarked",
+            "watermark": true
+        }, {
+            "function_name": "resize_to_fill",
+            "params": {
+                "width": 175,
+                "height": 125
+            },
+            "name": ":gallery_thumb",
+            "watermark": false
+        }
+    ]
+}

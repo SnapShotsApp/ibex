@@ -36,6 +36,7 @@ file 'ibex-linux' => SRC do
   sh({ 'GOOS' => 'linux' }, 'go build -o build/ibex-linux -v .')
 end
 
+desc 'Build binaries for OS X and Linux'
 task all: ['ibex-osx', 'ibex-linux']
 task default: :all
 
@@ -44,6 +45,11 @@ task run: 'ibex-osx' do
   cmd << '--debug' if ENV['DEBUG']
 
   sh(*cmd, 'resources/config.json')
+end
+
+desc 'Runs all tests'
+task test: 'bindata.go' do
+  sh 'go', 'test'
 end
 
 desc 'Prepends the Apache License header comment to all sources'

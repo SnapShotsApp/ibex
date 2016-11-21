@@ -1,0 +1,16 @@
+---
+language: go
+
+sudo: required
+
+services:
+  - docker
+
+install:
+  - go get github.com/jteeuwen/go-bindata/...
+
+before_script:
+  - docker_compose build
+  - docker_compose start
+
+script: rake test
