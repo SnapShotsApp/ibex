@@ -16,7 +16,7 @@ before_script:
 
 script:
   - rake test
-  - rake all
+  - rake clean all
 
 deploy:
   provider: releases
