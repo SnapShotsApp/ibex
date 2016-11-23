@@ -20,6 +20,8 @@ import (
 
 	_ "github.com/lib/pq"
 	"github.com/nleof/goyesql"
+	"regexp"
+	"strings"
 )
 
 type picture struct {
@@ -37,10 +39,24 @@ type photographerInfo struct {
 	picture sql.NullString
 }
 
+type watermark struct {
+	id       int
+	logo     sql.NullString
+	disabled bool
+	alpha    int
+	scale    int
+	offset   int
+	position string
+}
+
 // DB encapsulates a DB connection + queries
 type DB struct {
 	conn    *sql.DB
 	queries goyesql.Queries
+}
+
+func newNullString(str string) sql.NullString {
+	return sql.NullString{Valid: true, String: str}
 }
 
 // NewDB connects to the database and loads the queries from YeSQL.
@@ -110,4 +126,26 @@ func (db *DB) loadPhotographerInfo(userID int) photographerInfo {
 	}
 
 	return pi
+}
+
+func (db *DB) loadWatermark(photographerInfoID int) watermark {
+	var wm = watermark{}
+
+	err := db.conn.QueryRow(db.queries["watermark_by_photographer_info_id"], photographerInfoID).Scan(
+		&wm.id, &wm.logo, &wm.disabled, &wm.alpha, &wm.scale, &wm.offset, &wm.position)
+
+	switch {
+	case err == sql.ErrNoRows:
+		Debug("No watermark found for photographerInfo %d", photographerInfoID)
+		break
+	case err != nil:
+		handleErr(err)
+		break
+	default:
+		matched := regexp.MustCompile(`[- ]`).ReplaceAllString(wm.position, "")
+		matched = regexp.MustCompile(`\n`).ReplaceAllString(strings.TrimSpace(matched), ",")
+		wm.position = matched
+	}
+
+	return wm
 }

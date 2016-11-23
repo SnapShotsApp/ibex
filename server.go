@@ -25,7 +25,9 @@ import (
 )
 
 const re = `(?i)uploads/(?P<env>\w+)/(?P<username>\w+)?/?picture/attachment/(?P<id>\d+)/(?P<name>\w+)$`
-const watermarkPathFmt = "%s/uploads/%s/photographer_info/picture/%d/%s"
+const watermarkPathFmt = "%s/uploads/%s/%s/%d/%s"
+const photographerInfoPathPart = "photographer_info/picture"
+const watermarkPathPart = "watermark/logo"
 const picturePathFmt = "%s/uploads/%s/picture/attachment/%d/%s"
 
 var pathMatcher *regexp.Regexp
@@ -110,11 +112,12 @@ func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[s
 	for key, val := range version {
 		if key == "watermark" {
 			if val == true && h.isPhotographerImage(pictureID) {
-				vals.Add("mark", h.getWatermarkURL(pictureID, parts["env"]))
-				vals.Add("mark_scale", "15")
-				vals.Add("mark_pos", "bottom,right")
-				vals.Add("mark_offset", "3")
-				vals.Add("mark_alpha", "70")
+				wm := h.getWatermarkInfo(pictureID, parts["env"])
+				vals.Add("mark", wm.logo.String)
+				vals.Add("mark_scale", strconv.Itoa(wm.scale))
+				vals.Add("mark_pos", wm.position)
+				vals.Add("mark_offset", strconv.Itoa(wm.offset))
+				vals.Add("mark_alpha", strconv.Itoa(wm.alpha))
 			}
 
 			continue
@@ -157,20 +160,34 @@ func (h imagizerHandler) isPhotographerImage(id int) bool {
 	return is
 }
 
-func (h imagizerHandler) getWatermarkURL(id int, env string) string {
+func (h imagizerHandler) getWatermarkInfo(id int, env string) watermark {
 	pic := h.db.loadPicture(id)
 	pi := h.db.loadPhotographerInfo(pic.userID)
+	wm := h.db.loadWatermark(pi.id)
 
-	var watermark string
+	if wm.id == 0 {
+		wm = watermark{
+			logo:     newNullString("https://www.snapshots.com/images/icon.png"),
+			disabled: false,
+			alpha:    70,
+			scale:    15,
+			offset:   3,
+			position: "bottom,right",
+		}
 
-	if pi.picture.Valid {
-		watermark = fmt.Sprintf(watermarkPathFmt, h.config.CDNHost, env, pi.id, pi.picture.String)
+		if pi.picture.Valid {
+			wm.logo = newNullString(fmt.Sprintf(watermarkPathFmt,
+				h.config.CDNHost, env, photographerInfoPathPart, pi.id, pi.picture.String))
+		}
 	} else {
-		watermark = "https://snapshots.com/images/icon.png"
+		if wm.logo.Valid {
+			wm.logo = newNullString(fmt.Sprintf(watermarkPathFmt,
+				h.config.CDNHost, env, watermarkPathPart, wm.id, wm.logo.String))
+		}
 	}
 
-	Debug("Watermark URL: %s", watermark)
-	return watermark
+	Debug("Watermark: %v", wm)
+	return wm
 }
 
 func (h imagizerHandler) pathForImage(parts map[string]string) string {
