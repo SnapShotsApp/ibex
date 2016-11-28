@@ -16,35 +16,121 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"path"
-	"testing"
 )
 
-func load(t *testing.T) *Config {
+type testLogger struct {
+	output bool
+	log    bytes.Buffer
+}
+
+func (t testLogger) Info(format string, args ...interface{}) {
+	toWrite := fmt.Sprintf("[INFO] "+format+"\n", args)
+	if t.output {
+		fmt.Println(toWrite)
+	}
+	i, _ := t.log.WriteString(toWrite)
+	if i != len(toWrite) {
+		panic("Bad write")
+	}
+}
+
+func (t testLogger) Debug(format string, args ...interface{}) {
+	toWrite := fmt.Sprintf("[DEBUG] "+format+"\n", args)
+	if t.output {
+		fmt.Println(toWrite)
+	}
+	i, _ := t.log.WriteString(toWrite)
+	if i != len(toWrite) {
+		panic("Bad write")
+	}
+}
+
+func (t testLogger) Warn(format string, args ...interface{}) {
+	toWrite := fmt.Sprintf("[WARN] "+format+"\n", args)
+	if t.output {
+		fmt.Println(toWrite)
+	}
+	i, _ := t.log.WriteString(toWrite)
+	if i != len(toWrite) {
+		panic("Bad write")
+	}
+}
+
+func (t testLogger) Fatal(format string, args ...interface{}) {
+	toWrite := fmt.Sprintf("[FATAL] "+format+"\n", args)
+	if t.output {
+		fmt.Println(toWrite)
+	}
+	i, _ := t.log.WriteString(toWrite)
+	if i != len(toWrite) {
+		panic("Bad write")
+	}
+}
+
+func (t testLogger) HandleErr(msg interface{}) {
+	var toWrite string
+
+	switch msg := msg.(type) {
+	case string:
+		toWrite = fmt.Sprintln(msg)
+	case error:
+		toWrite = fmt.Sprintln(msg.Error())
+	}
+
+	i, _ := t.log.WriteString(toWrite)
+	if i != len(toWrite) {
+		panic("Bad Write")
+	}
+}
+
+func (t testLogger) CloseQuietly(c io.Closer) {
+	_ = c.Close()
+}
+
+func (t testLogger) String() string {
+	str := t.log.String()
+	t.log.Reset()
+	return str
+}
+
+func load() *Config {
 	p := path.Join("test_resources", "config.json")
 	config, err := LoadConfig(p)
 
 	if err != nil {
-		t.Errorf("Error when loading config json: %s", err)
+		panic(fmt.Sprintf("Error when loading config json: %s", err))
 	}
 
 	return config
 
 }
 
-func connect(c *Config, t *testing.T) *DB {
+func connect(c *Config) *DB {
 	conn, err := NewDB(c)
 
 	if err != nil {
-		t.Errorf("Error when connecting to DB: %v", err)
+		panic(fmt.Sprintf("Error when connecting to DB: %v", err))
 	}
 
 	return conn
 }
 
-func dbTestSetup(t *testing.T) (*Config, *DB) {
-	config := load(t)
-	db := connect(config, t)
+func dbTestSetup() (*Config, *DB) {
+	config := load()
+	db := connect(config)
 
 	return config, db
+}
+
+func withTestFixtures(f func(*Config, *DB, testLogger)) func() {
+	return func() {
+		config, db := dbTestSetup()
+		logger := testLogger{}
+
+		f(config, db, logger)
+	}
 }

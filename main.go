@@ -19,30 +19,29 @@ import (
 	"flag"
 )
 
-var (
-	debugLogEnabled bool
-	configFile      string
+const (
+	defaultConfigFilePath = "/etc/ibex.json"
 )
 
-func init() {
-	flag.BoolVar(&debugLogEnabled, "debug", false, "enable verbose debug logging")
-}
-
 func main() {
+	var debugLogEnabled bool
+	flag.BoolVar(&debugLogEnabled, "debug", false, "enable verbose debug logging")
 	flag.Parse()
 
+	var configFile string
 	configFile = flag.Arg(0)
 	if len(configFile) == 0 {
-		configFile = "/etc/ibex.json"
+		configFile = defaultConfigFilePath
 	}
 
-	Debug("Debug logging enabled")
+	logger := newLogger(debugLogEnabled)
+	logger.Debug("Debug logging enabled")
 
 	config, err := LoadConfig(configFile)
-	handleErr(err)
+	logger.HandleErr(err)
 
-	Info("Loaded config from %s", configFile)
-	Info("Found %d versions: %s", len(config.Versions), config.VersionNames())
+	logger.Info("Loaded config from %s", configFile)
+	logger.Info("Found %d versions: %s", len(config.Versions), config.VersionNames())
 
-	Start(config)
+	Start(config, logger)
 }

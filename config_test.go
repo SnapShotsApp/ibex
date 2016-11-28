@@ -16,76 +16,61 @@
 package main
 
 import (
-	"reflect"
 	"sort"
 	"testing"
+
+	. "github.com/smartystreets/goconvey/convey"
 )
 
 func TestLoading(t *testing.T) {
-	config := load(t)
+	Convey("Loads config from disk", t, func() {
+		config := load()
 
-	if config.BindPort != 192048 {
-		t.Errorf("Expected config.BindPort to be 192048, was %v", config.BindPort)
-	}
-
-	if len(config.Versions) != 3 {
-		t.Errorf("Expected there to be 3 Versions, was %v", len(config.Versions))
-	}
-
-	if config.BucketName != "test-bucket" {
-		t.Errorf("Expected config.BucketName to be test-bucket, was %v", config.BucketName)
-	}
+		So(config.BindPort, ShouldEqual, 192048)
+		So(len(config.Versions), ShouldEqual, 3)
+		So(config.BucketName, ShouldEqual, "test-bucket")
+	})
 }
 
 func TestBindAddr(t *testing.T) {
-	config := load(t)
+	Convey("BindAddr() output", t, func() {
+		config := load()
 
-	addr := config.BindAddr()
-	if addr != ":192048" {
-		t.Errorf("Expected config.BindAddr() to be \":192048\", was %v", addr)
-	}
+		addr := config.BindAddr()
+		So(addr, ShouldEqual, ":192048")
+	})
 }
 
 func TestVersionNames(t *testing.T) {
-	config := load(t)
+	Convey("Version name extraction", t, func() {
+		config := load()
 
-	expected := []string{"thumb", "thumb_watermarked", "gallery_thumb"}
-	names := config.VersionNames()
+		expected := []string{"thumb", "thumb_watermarked", "gallery_thumb"}
+		names := config.VersionNames()
 
-	contains := func(name string) bool {
-		for _, n := range names {
-			if name == n {
-				return true
-			}
+		for _, str := range expected {
+			So(names, ShouldContain, str)
 		}
-
-		return false
-	}
-
-	for _, str := range expected {
-		if !contains(str) {
-			t.Errorf("Expected %v to contain %s", names, str)
-		}
-	}
+	})
 }
 
 func TestGetVersionsByName(t *testing.T) {
-	config := load(t)
+	Convey("Extacting versions into a map", t, func() {
+		config := load()
 
-	byName := config.getVersionsByName()
+		byName := config.getVersionsByName()
 
-	keys := make([]string, len(byName))
-	i := 0
-	for k := range byName {
-		keys[i] = k
-		i++
-	}
+		keys := make([]string, len(byName))
+		i := 0
+		for k := range byName {
+			keys[i] = k
+			i++
+		}
 
-	sort.Strings(keys)
-	names := config.VersionNames()
-	sort.Strings(names)
+		sort.Strings(keys)
+		names := config.VersionNames()
+		sort.Strings(names)
 
-	if !reflect.DeepEqual(keys, names) {
-		t.Errorf("Expected %v to equal %v", keys, config.VersionNames())
-	}
+		So(keys, ShouldResemble, names)
+	})
 }

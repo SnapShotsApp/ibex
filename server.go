@@ -24,18 +24,19 @@ import (
 	"strconv"
 )
 
-const re = `(?i)uploads/(?P<env>\w+)/(?P<username>\w+)?/?picture/attachment/(?P<id>\d+)/(?P<name>\w+)$`
+const re = `(?i)/?uploads/(?P<env>\w+)/(?P<username>\w+)?/?picture/attachment/(?P<id>\d+)/(?P<name>\w+)$`
 const watermarkPathFmt = "%s/uploads/%s/%s/%d/%s"
 const photographerInfoPathPart = "photographer_info/picture"
 const watermarkPathPart = "watermark/logo"
 const picturePathFmt = "%s/uploads/%s/picture/attachment/%d/%s"
 
 var pathMatcher *regexp.Regexp
-var imagizerHost *url.URL
 
 type imagizerHandler struct {
-	config *Config
-	db     *DB
+	imagizerHost *url.URL
+	config       *Config
+	db           *DB
+	logger       ILogger
 }
 
 func init() {
@@ -43,16 +44,18 @@ func init() {
 }
 
 // Start initializes and then starts the HTTP server
-func Start(c *Config) {
+func Start(c *Config, logger ILogger) {
 	db, err := NewDB(c)
-	handleErr(err)
+	logger.HandleErr(err)
 
-	imagizerHost, err = url.Parse(c.ImagizerHost)
-	handleErr(err)
+	imagizerHost, err := url.Parse(c.ImagizerHost)
+	logger.HandleErr(err)
 
 	handler := imagizerHandler{
-		config: c,
-		db:     db,
+		imagizerHost: imagizerHost,
+		config:       c,
+		db:           db,
+		logger:       logger,
 	}
 
 	s := &http.Server{
@@ -60,54 +63,70 @@ func Start(c *Config) {
 		Handler: handler,
 	}
 
-	Info("Listening on %s", s.Addr)
+	logger.Info("Listening on %s", s.Addr)
 	err = s.ListenAndServe()
-	handleErr(err)
+	logger.HandleErr(err)
 }
 
 func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if !pathMatcher.MatchString(req.URL.Path) {
-		Warn("Malformed path %s", req.URL.Path)
+	notFound := func(msg string) {
+		h.logger.Warn(msg)
 		http.NotFound(w, req)
+	}
+
+	if req.Method != http.MethodGet {
+		notFound("Only GET requests allowed")
+		return
+	}
+
+	if !pathMatcher.MatchString(req.URL.Path) {
+		notFound(fmt.Sprintf("Malformed Path: %s", req.URL.Path))
 		return
 	}
 
 	parts := extractPathPartsToMap(req.URL.Path)
-	Debug("URL Parts: %v", parts)
+	h.logger.Debug("URL Parts: %v", parts)
+
+	username, _ := parts["username"]
+	isDev := (parts["env"] == "development")
+	if isDev != (len(username) > 0) {
+		notFound(fmt.Sprintf("Malformed Path: %s", req.URL.Path))
+		return
+	}
 
 	version, ok := h.config.versionsByName[parts["name"]]
 	if !ok {
-		Warn("Version not found with name %s", parts["name"])
-		http.NotFound(w, req)
+		notFound(fmt.Sprintf("Version not found with name %s", parts["name"]))
 		return
 	}
-	Debug("Version found: %v", version)
+	h.logger.Debug("Version found: %v", version)
 
 	pictureID, err := strconv.Atoi(parts["id"])
-	handleErr(err)
+	h.logger.HandleErr(err)
 
-	pic := h.db.loadPicture(pictureID)
+	pic := h.db.loadPicture(pictureID, h.logger)
 	if pic.eventID == 0 {
-		Warn("Picture not found for ID %d", pictureID)
+		h.logger.Warn("Picture not found for ID %d", pictureID)
 		http.NotFound(w, req)
 		return
 	}
 
 	proxy := h.imagizerURL(version, parts)
 	resp, err := http.Get(proxy.String())
-	defer closeQuietly(resp.Body)
-	handleErr(err)
+	defer h.logger.CloseQuietly(resp.Body)
+	h.logger.HandleErr(err)
 
-	Debug("Imagizer response: %v", resp)
+	h.logger.Debug("Imagizer response: %v", resp)
 
-	_, err = io.Copy(w, resp.Body)
-	handleErr(err)
+	i, err := io.Copy(w, resp.Body)
+	h.logger.HandleErr(err)
+	h.logger.Debug("Copied %d bytes to output from Imagizer response", i)
 }
 
 func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[string]string) url.URL {
 	vals := url.Values{}
 	pictureID, err := strconv.Atoi(parts["id"])
-	handleErr(err)
+	h.logger.HandleErr(err)
 
 	for key, val := range version {
 		if key == "watermark" {
@@ -129,7 +148,7 @@ func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[s
 
 		switch val := val.(type) {
 		default:
-			Fatal("Unexpected type %T for %v", val, val)
+			h.logger.Fatal("Unexpected type %T for %v", val, val)
 		case string:
 			vals.Add(key, val)
 		case int:
@@ -142,28 +161,28 @@ func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[s
 	}
 
 	retURL := url.URL{}
-	retURL.Scheme = imagizerHost.Scheme
-	retURL.Host = imagizerHost.Host
+	retURL.Scheme = h.imagizerHost.Scheme
+	retURL.Host = h.imagizerHost.Host
 	retURL.Path = h.pathForImage(parts)
 	retURL.RawQuery = vals.Encode()
 
-	Debug("Imagizer URL: %s", retURL.String())
+	h.logger.Debug("Imagizer URL: %s", retURL.String())
 	return retURL
 }
 
 func (h imagizerHandler) isPhotographerImage(id int) bool {
-	pic := h.db.loadPicture(id)
-	ev := h.db.loadEvent(pic.eventID)
+	pic := h.db.loadPicture(id, h.logger)
+	ev := h.db.loadEvent(pic.eventID, h.logger)
 
 	is := pic.userID == ev.ownerID
-	Debug("is photographer image? %v", is)
+	h.logger.Debug("is photographer image? %v", is)
 	return is
 }
 
 func (h imagizerHandler) getWatermarkInfo(id int, env string) watermark {
-	pic := h.db.loadPicture(id)
-	pi := h.db.loadPhotographerInfo(pic.userID)
-	wm := h.db.loadWatermark(pi.id)
+	pic := h.db.loadPicture(id, h.logger)
+	pi := h.db.loadPhotographerInfo(pic.userID, h.logger)
+	wm := h.db.loadWatermark(pi.id, h.logger)
 
 	if wm.id == 0 {
 		wm = watermark{
@@ -186,15 +205,15 @@ func (h imagizerHandler) getWatermarkInfo(id int, env string) watermark {
 		}
 	}
 
-	Debug("Watermark: %v", wm)
+	h.logger.Debug("Watermark: %v", wm)
 	return wm
 }
 
 func (h imagizerHandler) pathForImage(parts map[string]string) string {
 	pictureID, err := strconv.Atoi(parts["id"])
-	handleErr(err)
+	h.logger.HandleErr(err)
 
-	pic := h.db.loadPicture(pictureID)
+	pic := h.db.loadPicture(pictureID, h.logger)
 	env, _ := parts["env"]
 
 	var envAndUsername string
@@ -207,7 +226,7 @@ func (h imagizerHandler) pathForImage(parts map[string]string) string {
 
 	path := fmt.Sprintf(picturePathFmt,
 		BucketNames[env], envAndUsername, pictureID, pic.attachment)
-	Debug("Path for image: %s", path)
+	h.logger.Debug("Path for image: %s", path)
 	return path
 }
 
