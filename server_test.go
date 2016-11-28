@@ -76,6 +76,3 @@ func TestPathMatching(t *testing.T) {
 		}))
 	}))
 }
-
-func TestProxyPathGeneration(t *testing.T) {
-}

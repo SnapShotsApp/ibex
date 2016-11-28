@@ -16,6 +16,7 @@
 package main
 
 import (
+	"database/sql"
 	"testing"
 
 	. "github.com/smartystreets/goconvey/convey"
@@ -114,4 +115,55 @@ func TestLoadPhotographerInfo(t *testing.T) {
 			So(real, ShouldEqual, expected)
 		}
 	}))
+}
+
+func TestLoadWatermark(t *testing.T) {
+	Convey("Loading watermarks", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
+		Convey("Not found", func() {
+			wm := db.loadWatermark(20, logger)
+			So(wm.id, ShouldEqual, 0)
+		})
+
+		Convey("Should only return the default", func() {
+			wm := db.loadWatermark(1, logger)
+			So(wm.id, ShouldEqual, 1)
+			So(wm.logo.String, ShouldEqual, "test_watermark.jpg")
+			So(wm.alpha, ShouldEqual, 70)
+			So(wm.position, ShouldEqual, "bottom,left")
+		})
+
+		Convey("Should properly parse all data", func() {
+			wm := db.loadWatermark(3, logger)
+			So(wm.id, ShouldEqual, 4)
+			So(wm.logo.String, ShouldEqual, "test_watermark3.jpg")
+			So(wm.disabled, ShouldEqual, false)
+			So(wm.alpha, ShouldEqual, 20)
+			So(wm.scale, ShouldEqual, 75)
+			So(wm.offset, ShouldEqual, 0)
+			So(wm.position, ShouldEqual, "top,right")
+
+			wm = db.loadWatermark(4, logger)
+			So(wm.id, ShouldEqual, 5)
+			So(wm.logo.Valid, ShouldEqual, false)
+			So(wm.disabled, ShouldEqual, true)
+			So(wm.alpha, ShouldEqual, 0)
+			So(wm.scale, ShouldEqual, 0)
+			So(wm.offset, ShouldEqual, 0)
+			So(wm.position, ShouldEqual, "")
+		})
+	}))
+}
+
+func TestNewNullString(t *testing.T) {
+	Convey("NewNullString output", t, func() {
+		cases := map[string]sql.NullString{
+			"foo":     sql.NullString{String: "foo", Valid: true},
+			"goobers": sql.NullString{String: "goobers", Valid: true},
+			"":        sql.NullString{String: "", Valid: false},
+		}
+
+		for input, expected := range cases {
+			So(newNullString(input), ShouldResemble, expected)
+		}
+	})
 }

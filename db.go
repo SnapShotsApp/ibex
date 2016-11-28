@@ -56,7 +56,13 @@ type DB struct {
 }
 
 func newNullString(str string) sql.NullString {
-	return sql.NullString{Valid: true, String: str}
+	ns := sql.NullString{Valid: true, String: str}
+
+	if len(str) == 0 {
+		ns.Valid = false
+	}
+
+	return ns
 }
 
 // NewDB connects to the database and loads the queries from YeSQL.
