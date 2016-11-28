@@ -22,3 +22,13 @@ You want to regenerate the bindata in debug mode. This loads it from disk instea
 `bindata.go` file: `go-bindata -debug resources/`.
 
 Then you can start the server with a command like `go run *.go resources/config.json`
+
+Testing
+-------
+
+The test suite uses Docker to setup and populate a small test database with postgres. You can start it
+with `docker-compose up`. The Rake task `rake test` waits for the database to be available before
+running tests (mainly for Travis).
+
+To run tests, you'll need to install Convey with `go get github.com/smartystreets/goconvey`. You can
+then either run the suite via `go test` or run `goconvey` to bring up an autorunner in the browser.
