@@ -1,6 +1,10 @@
 {
     "database_url": "postgres://gotest:gotest@localhost:9988/gotest?sslmode=disable",
     "bind_port": 192048,
+    "stats_server": {
+        "enabled": true,
+        "bind_port": 192049
+    },
     "imagizer_host": "http://imagizer.test",
     "cdn_host": "https://snapshots.test",
     "bucket_name": "test-bucket",

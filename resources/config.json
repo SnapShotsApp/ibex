@@ -1,6 +1,10 @@
 {
     "database_url": "postgres://snapshots:password@localhost:5432/snapshots_dev?sslmode=disable",
     "bind_port": 8901,
+    "stats_server": {
+        "enabled": true,
+        "bind_port": 8902
+    },
     "imagizer_host": "http://54.161.29.66",
     "cdn_host": "https://s3.amazonaws.com",
     "bucket_name": "snapshots-photos-dev",

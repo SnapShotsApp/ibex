@@ -39,6 +39,7 @@ type imagizerHandler struct {
 	config       *Config
 	db           *DB
 	logger       ILogger
+	statsChan    chan *stat
 }
 
 func init() {
@@ -46,7 +47,7 @@ func init() {
 }
 
 // Start initializes and then starts the HTTP server
-func Start(c *Config, logger ILogger) {
+func Start(c *Config, logger ILogger, statsChan chan *stat) {
 	db, err := NewDB(c)
 	logger.HandleErr(err)
 
@@ -58,6 +59,7 @@ func Start(c *Config, logger ILogger) {
 		config:       c,
 		db:           db,
 		logger:       logger,
+		statsChan:    statsChan,
 	}
 
 	s := &http.Server{
@@ -77,11 +79,15 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// TODO: lower this based on real-world performance
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	timer := time.AfterFunc(5*time.Second, func() { cancel() })
+	timer := time.AfterFunc(5*time.Second, func() {
+		h.statsChan <- &stat{StatTimeout, ""}
+		cancel()
+	})
 	req.WithContext(ctx)
 
 	notFound := func(msg string) {
 		h.logger.Warn(msg)
+		h.statsChan <- &stat{StatBadRequest, ""}
 		http.NotFound(w, req)
 		cancel()
 	}
@@ -149,6 +155,8 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		timer.Reset(150 * time.Millisecond)
 		_, err := io.CopyN(w, resp.Body, 1024)
 		if err == io.EOF {
+			timer.Stop()
+			h.statsChan <- &stat{StatServedPicture, parts["name"]}
 			break
 		} else {
 			handleErr(err)

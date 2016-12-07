@@ -40,14 +40,21 @@ type Version struct {
 	Params       map[string]interface{} `json:"params"`
 }
 
+// StatsServerConfig contains configuration for the stats server
+type StatsServerConfig struct {
+	Enabled  bool `json:"enabled"`
+	BindPort int  `json:"bind_port"`
+}
+
 // Config loads and contains configs from the json file
 type Config struct {
-	DatabaseURL    string    `json:"database_url"`
-	BindPort       int       `json:"bind_port"`
-	Versions       []Version `json:"versions"`
-	ImagizerHost   string    `json:"imagizer_host"`
-	CDNHost        string    `json:"cdn_host"`
-	BucketName     string    `json:"bucket_name"`
+	DatabaseURL    string            `json:"database_url"`
+	BindPort       int               `json:"bind_port"`
+	Versions       []Version         `json:"versions"`
+	StatsServer    StatsServerConfig `json:"stats_server"`
+	ImagizerHost   string            `json:"imagizer_host"`
+	CDNHost        string            `json:"cdn_host"`
+	BucketName     string            `json:"bucket_name"`
 	versionsByName versionProperties
 }
 
@@ -76,6 +83,11 @@ func LoadConfig(path string) (*Config, error) {
 
 // BindAddr returns a http.Server compatible addr
 func (c *Config) BindAddr() string {
+	return fmt.Sprintf(":%d", c.BindPort)
+}
+
+// BindAddr returns a http.Server compatible addr
+func (c StatsServerConfig) BindAddr() string {
 	return fmt.Sprintf(":%d", c.BindPort)
 }
 
