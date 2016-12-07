@@ -16,12 +16,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
+	"time"
 )
 
 const re = `(?i)/?uploads/(?P<env>\w+)/(?P<username>\w+)?/?picture/attachment/(?P<id>\d+)/(?P<name>\w+)(?:/[a-zA-Z0-9]+)?$`
@@ -59,8 +61,10 @@ func Start(c *Config, logger ILogger) {
 	}
 
 	s := &http.Server{
-		Addr:    c.BindAddr(),
-		Handler: handler,
+		Addr:         c.BindAddr(),
+		Handler:      handler,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 
 	logger.Info("Listening on %s", s.Addr)
@@ -69,9 +73,24 @@ func Start(c *Config, logger ILogger) {
 }
 
 func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// 5 seconds max from start to finish
+	// TODO: lower this based on real-world performance
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	timer := time.AfterFunc(5*time.Second, func() { cancel() })
+	req.WithContext(ctx)
+
 	notFound := func(msg string) {
 		h.logger.Warn(msg)
 		http.NotFound(w, req)
+		cancel()
+	}
+
+	handleErr := func(err error) {
+		if err != nil {
+			cancel()
+		}
+		h.logger.HandleErr(err)
 	}
 
 	if req.Method != http.MethodGet {
@@ -102,7 +121,7 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	h.logger.Debug("Version found: %v", version)
 
 	pictureID, err := strconv.Atoi(parts["id"])
-	h.logger.HandleErr(err)
+	handleErr(err)
 
 	pic := h.db.loadPicture(pictureID, h.logger)
 	if pic.eventID == 0 {
@@ -112,15 +131,29 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	proxy := h.imagizerURL(version, parts)
-	resp, err := http.Get(proxy.String())
+	imagizerReq, err := http.NewRequest("GET", proxy.String(), nil)
+	handleErr(err)
+	reqCtx, reqCancel := context.WithTimeout(ctx, 1*time.Second)
+	defer reqCancel()
+	imagizerReq.WithContext(reqCtx)
+	resp, err := http.DefaultClient.Do(imagizerReq)
+	handleErr(err)
 	defer h.logger.CloseQuietly(resp.Body)
-	h.logger.HandleErr(err)
-
 	h.logger.Debug("Imagizer response: %v", resp)
 
-	i, err := io.Copy(w, resp.Body)
-	h.logger.HandleErr(err)
-	h.logger.Debug("Copied %d bytes to output from Imagizer response", i)
+	for {
+		if ctx.Err() != nil {
+			break
+		}
+
+		timer.Reset(150 * time.Millisecond)
+		_, err := io.CopyN(w, resp.Body, 1024)
+		if err == io.EOF {
+			break
+		} else {
+			handleErr(err)
+		}
+	}
 }
 
 func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[string]string) url.URL {
