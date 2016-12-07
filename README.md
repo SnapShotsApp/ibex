@@ -17,7 +17,6 @@ Then just run `rake`.
 
 Developing
 ----------
-
 You want to regenerate the bindata in debug mode. This loads it from disk instead of embedding it in the
 `bindata.go` file: `go-bindata -debug resources/`.
 
@@ -25,10 +24,16 @@ Then you can start the server with a command like `go run *.go resources/config.
 
 Testing
 -------
-
 The test suite uses Docker to setup and populate a small test database with postgres. You can start it
 with `docker-compose up`. The Rake task `rake test` waits for the database to be available before
 running tests (mainly for Travis).
 
 To run tests, you'll need to install Convey with `go get github.com/smartystreets/goconvey`. You can
 then either run the suite via `go test` or run `goconvey` to bring up an autorunner in the browser.
+
+Stats Server
+------------
+A stats server is started by default on port `8902`. This responds to both `/config` and `/stats` to
+get some insight into the running server. We use this internally for ELB health checks, and it can
+be disabled if desired in the config.
+
