@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	. "github.com/smartystreets/goconvey/convey"
 )
@@ -41,7 +42,7 @@ func TestPathMatching(t *testing.T) {
 
 		Convey("Handling path recognition", withImagizerTestServer(hf, func(server *httptest.Server) {
 			imagizerHost, _ := url.Parse(server.URL)
-			handler := imagizerHandler{imagizerHost, config, db, logger}
+			handler := imagizerHandler{imagizerHost, config, db, logger, NewBlackHole(), 1 * time.Second}
 
 			badReqs := []*http.Request{
 				httptest.NewRequest("GET", "/foo", nil),
@@ -79,6 +80,26 @@ func TestPathMatching(t *testing.T) {
 					So(w.Code, ShouldEqual, 200)
 				})
 			}
+		}))
+	}))
+}
+
+func TestConnectionTimeouts(t *testing.T) {
+	Convey("Server Timeouts", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
+		hf := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(70 * time.Millisecond)
+			fmt.Fprintf(w, "Hello")
+		})
+
+		Convey("Do not hang forever", withImagizerTestServer(hf, func(server *httptest.Server) {
+			imagizerHost, _ := url.Parse(server.URL)
+
+			handler := imagizerHandler{imagizerHost, config, db, logger, NewBlackHole(), 50 * time.Millisecond}
+			req := httptest.NewRequest("GET", "/uploads/staging/picture/attachment/1/thumb/3", nil)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			So(w.Code, ShouldEqual, 504)
 		}))
 	}))
 }

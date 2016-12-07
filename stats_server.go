@@ -13,7 +13,9 @@ type configHandler struct {
 }
 
 func (h configHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	h.logger.CloseQuietly(req.Body)
+	if req.Body != nil {
+		h.logger.CloseQuietly(req.Body)
+	}
 	h.logger.Debug("Request for /config")
 
 	body, err := json.Marshal(h.config)
@@ -88,7 +90,9 @@ func (s *Stats) Listen() {
 }
 
 func (s *Stats) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	s.logger.CloseQuietly(req.Body)
+	if req.Body != nil {
+		s.logger.CloseQuietly(req.Body)
+	}
 	s.logger.Debug("Request for /stats")
 
 	body, err := json.Marshal(s)

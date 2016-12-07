@@ -43,12 +43,14 @@ func main() {
 	logger.Info("Loaded config from %s", configFile)
 	logger.Info("Found %d versions: %s", len(config.Versions), config.VersionNames())
 
+	var statsChan chan *stat
 	if config.StatsServer.Enabled {
 		stats := NewStats(logger)
 		go stats.Start(config)
-
-		Start(config, logger, stats.statsChan)
+		statsChan = stats.statsChan
 	} else {
-		Start(config, logger, nil)
+		statsChan = NewBlackHole()
 	}
+
+	Start(config, logger, statsChan)
 }

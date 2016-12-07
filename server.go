@@ -35,11 +35,12 @@ const picturePathFmt = "%s/uploads/%s/picture/attachment/%d/%s"
 var pathMatcher *regexp.Regexp
 
 type imagizerHandler struct {
-	imagizerHost *url.URL
-	config       *Config
-	db           *DB
-	logger       ILogger
-	statsChan    chan *stat
+	imagizerHost    *url.URL
+	config          *Config
+	db              *DB
+	logger          ILogger
+	statsChan       chan *stat
+	responseTimeout time.Duration
 }
 
 func init() {
@@ -55,18 +56,19 @@ func Start(c *Config, logger ILogger, statsChan chan *stat) {
 	logger.HandleErr(err)
 
 	handler := imagizerHandler{
-		imagizerHost: imagizerHost,
-		config:       c,
-		db:           db,
-		logger:       logger,
-		statsChan:    statsChan,
+		imagizerHost:    imagizerHost,
+		config:          c,
+		db:              db,
+		logger:          logger,
+		statsChan:       statsChan,
+		responseTimeout: 5 * time.Second,
 	}
 
 	s := &http.Server{
 		Addr:         c.BindAddr(),
 		Handler:      handler,
 		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: handler.responseTimeout,
 	}
 
 	logger.Info("Listening on %s", s.Addr)
@@ -79,21 +81,24 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// TODO: lower this based on real-world performance
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	timer := time.AfterFunc(5*time.Second, func() {
-		h.statsChan <- &stat{StatTimeout, ""}
+	timer := time.AfterFunc(h.responseTimeout, func() {
 		cancel()
+		h.statsChan <- &stat{StatTimeout, ""}
+		http.Error(w, "timeout", http.StatusGatewayTimeout)
 	})
-	req.WithContext(ctx)
+	req = req.WithContext(ctx)
 
 	notFound := func(msg string) {
+		timer.Stop()
+		cancel()
 		h.logger.Warn(msg)
 		h.statsChan <- &stat{StatBadRequest, ""}
 		http.NotFound(w, req)
-		cancel()
 	}
 
 	handleErr := func(err error) {
 		if err != nil {
+			timer.Stop()
 			cancel()
 		}
 		h.logger.HandleErr(err)
@@ -141,10 +146,9 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	handleErr(err)
 	reqCtx, reqCancel := context.WithTimeout(ctx, 1*time.Second)
 	defer reqCancel()
-	imagizerReq.WithContext(reqCtx)
+	imagizerReq = imagizerReq.WithContext(reqCtx)
 	resp, err := http.DefaultClient.Do(imagizerReq)
 	handleErr(err)
-	defer h.logger.CloseQuietly(resp.Body)
 	h.logger.Debug("Imagizer response: %v", resp)
 
 	for {
@@ -152,7 +156,11 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			break
 		}
 
-		timer.Reset(150 * time.Millisecond)
+		ok := timer.Reset(150 * time.Millisecond)
+		if !ok {
+			break
+		}
+
 		_, err := io.CopyN(w, resp.Body, 1024)
 		if err == io.EOF {
 			timer.Stop()
