@@ -100,8 +100,8 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			timer.Stop()
 			cancel()
+			h.logger.Warn(err.Error())
 		}
-		h.logger.HandleErr(err)
 	}
 
 	if req.Method != http.MethodGet {
@@ -144,7 +144,7 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	proxy := h.imagizerURL(version, parts)
 	imagizerReq, err := http.NewRequest("GET", proxy.String(), nil)
 	handleErr(err)
-	reqCtx, reqCancel := context.WithTimeout(ctx, 1*time.Second)
+	reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer reqCancel()
 	imagizerReq = imagizerReq.WithContext(reqCtx)
 	resp, err := http.DefaultClient.Do(imagizerReq)
