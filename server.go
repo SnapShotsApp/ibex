@@ -97,11 +97,10 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	handleErr := func(err error) {
-		if err != nil {
-			timer.Stop()
-			cancel()
-			h.logger.Warn(err.Error())
-		}
+		timer.Stop()
+		cancel()
+		h.logger.Warn(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 
 	if req.Method != http.MethodGet {
@@ -132,7 +131,10 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	h.logger.Debug("Version found: %v", version)
 
 	pictureID, err := strconv.Atoi(parts["id"])
-	handleErr(err)
+	if err != nil {
+		handleErr(err)
+		return
+	}
 
 	pic := h.db.loadPicture(pictureID, h.logger)
 	if pic.eventID == 0 {
@@ -143,12 +145,18 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	proxy := h.imagizerURL(version, parts)
 	imagizerReq, err := http.NewRequest("GET", proxy.String(), nil)
-	handleErr(err)
+	if err != nil {
+		handleErr(err)
+		return
+	}
 	reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer reqCancel()
 	imagizerReq = imagizerReq.WithContext(reqCtx)
 	resp, err := http.DefaultClient.Do(imagizerReq)
-	handleErr(err)
+	if err != nil {
+		handleErr(err)
+		return
+	}
 	h.logger.Debug("Imagizer response: %v", resp)
 
 	for {
@@ -166,8 +174,9 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			timer.Stop()
 			h.statsChan <- &stat{StatServedPicture, parts["name"]}
 			break
-		} else {
+		} else if err != nil {
 			handleErr(err)
+			return
 		}
 	}
 }
