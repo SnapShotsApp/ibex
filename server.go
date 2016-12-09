@@ -61,7 +61,7 @@ func Start(c *Config, logger ILogger, statsChan chan *stat) {
 		db:              db,
 		logger:          logger,
 		statsChan:       statsChan,
-		responseTimeout: 5 * time.Second,
+		responseTimeout: 10 * time.Second,
 	}
 
 	s := &http.Server{
@@ -76,125 +76,176 @@ func Start(c *Config, logger ILogger, statsChan chan *stat) {
 	logger.HandleErr(err)
 }
 
-func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// 5 seconds max from start to finish
-	// TODO: lower this based on real-world performance
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	timer := time.AfterFunc(h.responseTimeout, func() {
-		cancel()
-		h.statsChan <- &stat{StatTimeout, ""}
-		http.Error(w, "timeout", http.StatusGatewayTimeout)
-	})
-	req = req.WithContext(ctx)
+type errorResponse struct {
+	err    error
+	status int
+}
 
-	notFound := func(msg string) {
-		timer.Stop()
-		cancel()
-		h.logger.Warn(msg)
-		h.statsChan <- &stat{StatBadRequest, ""}
-		http.NotFound(w, req)
-	}
-
-	handleErr := func(err error) {
-		timer.Stop()
-		cancel()
-		h.logger.Warn(err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-
-	if req.Method != http.MethodGet {
-		notFound("Only GET requests allowed")
+func validateAndExtractPath(req *http.Request) (parts map[string]string, err error) {
+	if req.Method != http.MethodGet || !pathMatcher.MatchString(req.URL.Path) {
+		err = fmt.Errorf("Malformed Path: %s", req.URL.Path)
 		return
 	}
 
-	if !pathMatcher.MatchString(req.URL.Path) {
-		notFound(fmt.Sprintf("Malformed Path: %s", req.URL.Path))
-		return
-	}
+	parts = extractPathPartsToMap(req.URL.Path)
 
-	parts := extractPathPartsToMap(req.URL.Path)
-	h.logger.Debug("URL Parts: %v", parts)
-
-	username, _ := parts["username"]
+	username := parts["username"]
 	isDev := (parts["env"] == "development")
 	if isDev != (len(username) > 0) {
-		notFound(fmt.Sprintf("Malformed Path: %s", req.URL.Path))
+		err = fmt.Errorf("Malformed Path: %s", req.URL.Path)
+	}
+
+	return
+}
+
+func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w http.ResponseWriter, done chan string, errChan chan errorResponse) {
+	innerCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	logger := innerCtx.Value("logger").(ILogger)
+
+	parts, err := validateAndExtractPath(req)
+	if err != nil {
+		cancel()
+		errChan <- errorResponse{err, http.StatusNotFound}
 		return
 	}
+	logger.Debug("URL Parts: %v", parts)
 
 	version, ok := h.config.versionsByName[parts["name"]]
 	if !ok {
-		notFound(fmt.Sprintf("Version not found with name %s", parts["name"]))
+		cancel()
+		errChan <- errorResponse{fmt.Errorf("Version not found with name %s", parts["name"]), http.StatusNotFound}
 		return
 	}
-	h.logger.Debug("Version found: %v", version)
+	logger.Debug("Version found: %v", version)
 
 	pictureID, err := strconv.Atoi(parts["id"])
 	if err != nil {
-		handleErr(err)
+		cancel()
+		errChan <- errorResponse{err, http.StatusInternalServerError}
 		return
 	}
 
-	pic := h.db.loadPicture(pictureID, h.logger)
-	if pic.eventID == 0 {
-		h.logger.Warn("Picture not found for ID %d", pictureID)
-		http.NotFound(w, req)
+	_, err = h.db.loadPicture(innerCtx, pictureID)
+	if err != nil {
+		cancel()
+		var status int
+
+		switch err.(type) {
+		case noRowsErr:
+			status = http.StatusNotFound
+		default:
+			status = http.StatusInternalServerError
+		}
+
+		errChan <- errorResponse{err, status}
 		return
 	}
 
-	proxy := h.imagizerURL(version, parts)
+	proxy, err := h.imagizerURL(innerCtx, version, parts)
+	if err != nil {
+		cancel()
+		errChan <- errorResponse{err, http.StatusInternalServerError}
+		return
+	}
 	imagizerReq, err := http.NewRequest("GET", proxy.String(), nil)
 	if err != nil {
-		handleErr(err)
+		cancel()
+		errChan <- errorResponse{err, http.StatusInternalServerError}
 		return
 	}
-	reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer reqCancel()
-	imagizerReq = imagizerReq.WithContext(reqCtx)
+	imagizerReq = imagizerReq.WithContext(innerCtx)
+
 	resp, err := http.DefaultClient.Do(imagizerReq)
 	if err != nil {
-		handleErr(err)
+		cancel()
+		errChan <- errorResponse{err, http.StatusInternalServerError}
 		return
 	}
-	h.logger.Debug("Imagizer response: %v", resp)
+	logger.Debug("Imagizer response: %v", resp)
 
-	for {
-		if ctx.Err() != nil {
-			break
-		}
+	_, err = io.Copy(w, resp.Body)
+	if err != nil {
+		cancel()
+		errChan <- errorResponse{err, http.StatusInternalServerError}
+		return
+	}
 
-		ok := timer.Reset(150 * time.Millisecond)
-		if !ok {
-			break
-		}
+	done <- parts["name"]
+}
 
-		_, err := io.CopyN(w, resp.Body, 1024)
-		if err == io.EOF {
-			timer.Stop()
-			h.statsChan <- &stat{StatServedPicture, parts["name"]}
-			break
-		} else if err != nil {
-			handleErr(err)
+func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), h.responseTimeout)
+	ctx = context.WithValue(ctx, "logger", h.logger)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	done := make(chan string)
+	errChan := make(chan errorResponse)
+	go h.handleRequest(ctx, req, w, done, errChan)
+
+	handleTimeout := func() {
+		http.Error(w, "timeout", http.StatusGatewayTimeout)
+		h.statsChan <- &stat{StatTimeout, ""}
+	}
+
+	select {
+	case name := <-done:
+		h.statsChan <- &stat{StatServedPicture, name}
+	case errResp := <-errChan:
+		if errResp.err == context.DeadlineExceeded || errResp.err == context.Canceled {
+			handleTimeout()
 			return
 		}
+
+		http.Error(w, errResp.err.Error(), errResp.status)
+		h.statsChan <- &stat{StatBadRequest, ""}
+	case <-ctx.Done():
+		handleTimeout()
 	}
 }
 
-func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[string]string) url.URL {
+func (h imagizerHandler) imagizerURL(ctx context.Context, version map[string]interface{}, parts map[string]string) (url.URL, error) {
 	vals := url.Values{}
+	retURL := url.URL{}
+
 	pictureID, err := strconv.Atoi(parts["id"])
-	h.logger.HandleErr(err)
+	if err != nil {
+		return retURL, err
+	}
 
 	for key, val := range version {
-		if key == "watermark" {
-			if val == true && h.isPhotographerImage(pictureID) {
-				wm := h.getWatermarkInfo(pictureID, parts["env"])
+		if key == "watermark" && val == true {
+			isPhotogImage, err := h.isPhotographerImage(ctx, pictureID)
+			if err != nil {
+				return retURL, err
+			}
+
+			if isPhotogImage {
+				wm, err := h.getWatermarkInfo(ctx, pictureID, parts["env"])
+				if err != nil {
+					return retURL, err
+				}
+
 				vals.Add("mark", wm.logo.String)
-				vals.Add("mark_scale", strconv.Itoa(wm.scale))
-				vals.Add("mark_pos", wm.position)
-				vals.Add("mark_offset", strconv.Itoa(wm.offset))
-				vals.Add("mark_alpha", strconv.Itoa(wm.alpha))
+				if wm.scale.Valid {
+					vals.Add("mark_scale", strconv.FormatInt(wm.scale.Int64, 10))
+				} else {
+
+					vals.Add("mark_scale", "0")
+				}
+				if wm.offset.Valid {
+					vals.Add("mark_offset", strconv.FormatInt(wm.offset.Int64, 10))
+				} else {
+					vals.Add("mark_offset", "0")
+				}
+				if wm.alpha.Valid {
+					vals.Add("mark_alpha", strconv.FormatInt(wm.alpha.Int64, 10))
+				} else {
+					vals.Add("mark_alpha", "0")
+				}
+				vals.Add("mark_pos", wm.position.String)
 			}
 
 			continue
@@ -206,7 +257,7 @@ func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[s
 
 		switch val := val.(type) {
 		default:
-			h.logger.Fatal("Unexpected type %T for %v", val, val)
+			return retURL, fmt.Errorf("Unexpected type %T for %v", val, val)
 		case string:
 			vals.Add(key, val)
 		case int:
@@ -218,38 +269,53 @@ func (h imagizerHandler) imagizerURL(version map[string]interface{}, parts map[s
 		}
 	}
 
-	retURL := url.URL{}
+	path, err := h.pathForImage(ctx, parts)
+	if err != nil {
+		return retURL, err
+	}
+
 	retURL.Scheme = h.imagizerHost.Scheme
 	retURL.Host = h.imagizerHost.Host
-	retURL.Path = h.pathForImage(parts)
+	retURL.Path = path
 	retURL.RawQuery = vals.Encode()
 
-	h.logger.Debug("Imagizer URL: %s", retURL.String())
-	return retURL
+	return retURL, nil
 }
 
-func (h imagizerHandler) isPhotographerImage(id int) bool {
-	pic := h.db.loadPicture(id, h.logger)
-	ev := h.db.loadEvent(pic.eventID, h.logger)
+func (h imagizerHandler) isPhotographerImage(ctx context.Context, id int) (bool, error) {
+	pic, err := h.db.loadPicture(ctx, id)
+	if err != nil {
+		return false, err
+	}
+
+	ev, err := h.db.loadEvent(ctx, pic.eventID)
+	if err != nil {
+		return false, err
+	}
 
 	is := pic.userID == ev.ownerID
-	h.logger.Debug("is photographer image? %v", is)
-	return is
+	return is, nil
 }
 
-func (h imagizerHandler) getWatermarkInfo(id int, env string) watermark {
-	pic := h.db.loadPicture(id, h.logger)
-	pi := h.db.loadPhotographerInfo(pic.userID, h.logger)
-	wm := h.db.loadWatermark(pi.id, h.logger)
+func (h imagizerHandler) getWatermarkInfo(ctx context.Context, id int, env string) (watermark, error) {
+	pic, err := h.db.loadPicture(ctx, id)
+	if err != nil {
+		return watermark{}, err
+	}
+	pi, err := h.db.loadPhotographerInfo(ctx, pic.userID)
+	if err != nil {
+		return watermark{}, err
+	}
+	wm, err := h.db.loadWatermark(ctx, pi.id)
 
-	if wm.id == 0 {
+	if err != nil {
 		wm = watermark{
 			logo:     newNullString("https://www.snapshots.com/images/icon.png"),
 			disabled: false,
-			alpha:    70,
-			scale:    15,
-			offset:   3,
-			position: "bottom,right",
+			alpha:    newNullInt64(70),
+			scale:    newNullInt64(15),
+			offset:   newNullInt64(3),
+			position: newNullString("bottom,right"),
 		}
 
 		if pi.picture.Valid {
@@ -263,16 +329,21 @@ func (h imagizerHandler) getWatermarkInfo(id int, env string) watermark {
 		}
 	}
 
-	h.logger.Debug("Watermark: %v", wm)
-	return wm
+	return wm, nil
 }
 
-func (h imagizerHandler) pathForImage(parts map[string]string) string {
+func (h imagizerHandler) pathForImage(ctx context.Context, parts map[string]string) (string, error) {
 	pictureID, err := strconv.Atoi(parts["id"])
-	h.logger.HandleErr(err)
+	if err != nil {
+		return "", err
+	}
 
-	pic := h.db.loadPicture(pictureID, h.logger)
-	env, _ := parts["env"]
+	pic, err := h.db.loadPicture(ctx, pictureID)
+	if err != nil {
+		return "", err
+	}
+
+	env := parts["env"]
 
 	var envAndUsername string
 
@@ -284,8 +355,7 @@ func (h imagizerHandler) pathForImage(parts map[string]string) string {
 
 	path := fmt.Sprintf(picturePathFmt,
 		BucketNames[env], envAndUsername, pictureID, pic.attachment)
-	h.logger.Debug("Path for image: %s", path)
-	return path
+	return path, nil
 }
 
 func extractPathPartsToMap(path string) map[string]string {

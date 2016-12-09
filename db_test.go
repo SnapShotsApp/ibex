@@ -16,6 +16,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
@@ -56,8 +57,13 @@ func TestConnectionAndQuery(t *testing.T) {
 
 func TestLoadEvent(t *testing.T) {
 	Convey("Loading events", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
-		ev1 := db.loadEvent(1, logger)
-		ev2 := db.loadEvent(2, logger)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, "logger", logger)
+
+		ev1, err := db.loadEvent(ctx, 1)
+		So(err, ShouldBeNil)
+		ev2, err := db.loadEvent(ctx, 2)
+		So(err, ShouldBeNil)
 		So(logger.log.Len(), ShouldEqual, 0)
 
 		cases := map[int]int{
@@ -73,8 +79,13 @@ func TestLoadEvent(t *testing.T) {
 
 func TestLoadPicture(t *testing.T) {
 	Convey("Loading pictures", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
-		pic1 := db.loadPicture(1, logger)
-		pic2 := db.loadPicture(2, logger)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, "logger", logger)
+
+		pic1, err := db.loadPicture(ctx, 1)
+		So(err, ShouldBeNil)
+		pic2, err := db.loadPicture(ctx, 2)
+		So(err, ShouldBeNil)
 		So(logger.log.Len(), ShouldEqual, 0)
 
 		cases := map[interface{}]interface{}{
@@ -96,9 +107,15 @@ func TestLoadPicture(t *testing.T) {
 
 func TestLoadPhotographerInfo(t *testing.T) {
 	Convey("Loading photographerInfos", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
-		pi1 := db.loadPhotographerInfo(1, logger)
-		pi2 := db.loadPhotographerInfo(3, logger)
-		pi3 := db.loadPhotographerInfo(4, logger)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, "logger", logger)
+
+		pi1, err := db.loadPhotographerInfo(ctx, 1)
+		So(err, ShouldBeNil)
+		pi2, err := db.loadPhotographerInfo(ctx, 3)
+		So(err, ShouldBeNil)
+		pi3, err := db.loadPhotographerInfo(ctx, 4)
+		So(err, ShouldBeNil)
 		So(logger.log.Len(), ShouldEqual, 0)
 
 		cases := map[interface{}]interface{}{
@@ -119,37 +136,47 @@ func TestLoadPhotographerInfo(t *testing.T) {
 
 func TestLoadWatermark(t *testing.T) {
 	Convey("Loading watermarks", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, "logger", logger)
+
+		var wm watermark
+		var err error
+
 		Convey("Not found", func() {
-			wm := db.loadWatermark(20, logger)
+			wm, err = db.loadWatermark(ctx, 20)
+			So(err, ShouldNotBeNil)
 			So(wm.id, ShouldEqual, 0)
 		})
 
 		Convey("Should only return the default", func() {
-			wm := db.loadWatermark(1, logger)
+			wm, err = db.loadWatermark(ctx, 1)
+			So(err, ShouldBeNil)
 			So(wm.id, ShouldEqual, 1)
 			So(wm.logo.String, ShouldEqual, "test_watermark.jpg")
-			So(wm.alpha, ShouldEqual, 70)
-			So(wm.position, ShouldEqual, "bottom,left")
+			So(wm.alpha.Int64, ShouldEqual, 70)
+			So(wm.position.String, ShouldEqual, "bottom,left")
 		})
 
 		Convey("Should properly parse all data", func() {
-			wm := db.loadWatermark(3, logger)
+			wm, err = db.loadWatermark(ctx, 3)
+			So(err, ShouldBeNil)
 			So(wm.id, ShouldEqual, 4)
 			So(wm.logo.String, ShouldEqual, "test_watermark3.jpg")
 			So(wm.disabled, ShouldEqual, false)
-			So(wm.alpha, ShouldEqual, 20)
-			So(wm.scale, ShouldEqual, 75)
-			So(wm.offset, ShouldEqual, 0)
-			So(wm.position, ShouldEqual, "top,right")
+			So(wm.alpha.Int64, ShouldEqual, 20)
+			So(wm.scale.Int64, ShouldEqual, 75)
+			So(wm.offset.Int64, ShouldEqual, 0)
+			So(wm.position.String, ShouldEqual, "top,right")
 
-			wm = db.loadWatermark(4, logger)
+			wm, err = db.loadWatermark(ctx, 4)
+			So(err, ShouldBeNil)
 			So(wm.id, ShouldEqual, 5)
 			So(wm.logo.Valid, ShouldEqual, false)
 			So(wm.disabled, ShouldEqual, true)
-			So(wm.alpha, ShouldEqual, 0)
-			So(wm.scale, ShouldEqual, 0)
-			So(wm.offset, ShouldEqual, 0)
-			So(wm.position, ShouldEqual, "")
+			So(wm.alpha.Valid, ShouldBeFalse)
+			So(wm.scale.Valid, ShouldBeFalse)
+			So(wm.offset.Valid, ShouldBeFalse)
+			So(wm.position.Valid, ShouldBeFalse)
 		})
 	}))
 }
