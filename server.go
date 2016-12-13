@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-const re = `(?i)/?uploads/(?P<env>\w+)/(?P<username>\w+)?/?picture/attachment/(?P<id>\d+)/(?P<name>\w+)(?:/[a-zA-Z0-9]+)?$`
+const re = `(?i)/?uploads/(?P<env>\w+)/(?P<username>\w+)?/?picture/attachment/(?P<id>\d+)/(?P<name>\w+)(?:/[a-zA-Z0-9_-]+)?$`
 const watermarkPathFmt = "%s/uploads/%s/%s/%d/%s"
 const photographerInfoPathPart = "photographer_info/picture"
 const watermarkPathPart = "watermark/logo"

@@ -48,7 +48,7 @@ func TestPathMatching(t *testing.T) {
 				httptest.NewRequest("GET", "/foo", nil),
 				httptest.NewRequest("GET", "/uploads/staging/jlindsey/picture/attachment/1/thumb", nil),
 				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/4/thumb", nil),
-				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/1/thumb/3/foo", nil),
+				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/1/thumb/3/foo+", nil),
 				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/2/large", nil),
 				httptest.NewRequest("DELETE", "/uploads/staging/picture/attachment/1/thumb", nil),
 				httptest.NewRequest("POST", "/uploads/staging/picture/attachment/1/thumb", nil),
@@ -61,6 +61,8 @@ func TestPathMatching(t *testing.T) {
 			goodReqs := []*http.Request{
 				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/1/thumb/3", nil),
 				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/2/gallery_thumb/abc123", nil),
+				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/2/gallery_thumb/abc-123", nil),
+				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/2/gallery_thumb/abc_123-", nil),
 				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/2/thumb", nil),
 				httptest.NewRequest("GET", "/uploads/staging/picture/attachment/2/gallery_thumb", nil),
 			}
