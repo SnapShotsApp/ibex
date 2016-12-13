@@ -1,9 +1,8 @@
 require 'rake/clean'
 
-CLEAN << 'bindata.go'
 CLEAN << 'build'
 
-SRC = FileList['bindata.go', '*.go', 'Godeps/*', 'vendor/**/*']
+SRC = FileList['*.go', 'Godeps/*', 'vendor/**/*']
 
 LICENSE_HEADER = %{
 /* Copyright <%= @year %> Snapshots LLC
@@ -52,10 +51,6 @@ end
 
 directory 'build'
 
-file 'bindata.go' => FileList['resources/*'] do
-  sh 'go-bindata resources/'
-end
-
 file 'ibex-osx' => SRC do
   sh({ 'GOOS' => 'darwin' }, 'go build -o build/ibex-osx -v .')
 end
@@ -72,11 +67,11 @@ task run: 'ibex-osx' do
   cmd = ['./build/ibex-osx']
   cmd << '--debug' if ENV['DEBUG']
 
-  sh(*cmd, 'resources/config.json')
+  sh(*cmd, 'test_resources/run_config.json')
 end
 
 desc 'Runs all tests'
-task test: 'bindata.go' do
+task :test do
   wait_for_database!
   sh 'go', 'test', '-v'
 end

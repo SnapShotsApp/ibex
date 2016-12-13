@@ -65,10 +65,8 @@ func Start(c *Config, logger ILogger, statsChan chan *stat) {
 	}
 
 	s := &http.Server{
-		Addr:         c.BindAddr(),
-		Handler:      handler,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: handler.responseTimeout,
+		Addr:    c.BindAddr(),
+		Handler: handler,
 	}
 
 	logger.Info("Listening on %s", s.Addr)
@@ -98,6 +96,19 @@ func validateAndExtractPath(req *http.Request) (parts map[string]string, err err
 	return
 }
 
+type requestInfo struct {
+	pictureID   int
+	env         string
+	username    string
+	versionName string
+	versionInfo map[string]interface{}
+	info        pictureInfo
+}
+
+func (r requestInfo) isPhotographerImage() bool {
+	return r.info.userID == r.info.ownerID
+}
+
 func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w http.ResponseWriter, done chan string, errChan chan errorResponse) {
 	innerCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -112,6 +123,12 @@ func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w
 	}
 	logger.Debug("URL Parts: %v", parts)
 
+	rinfo := requestInfo{
+		env:         parts["env"],
+		username:    parts["username"],
+		versionName: parts["name"],
+	}
+
 	version, ok := h.config.versionsByName[parts["name"]]
 	if !ok {
 		cancel()
@@ -120,14 +137,17 @@ func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w
 	}
 	logger.Debug("Version found: %v", version)
 
+	rinfo.versionInfo = version
+
 	pictureID, err := strconv.Atoi(parts["id"])
 	if err != nil {
 		cancel()
 		errChan <- errorResponse{err, http.StatusInternalServerError}
 		return
 	}
+	rinfo.pictureID = pictureID
 
-	_, err = h.db.loadPicture(innerCtx, pictureID)
+	info, err := h.db.loadPictureInfo(ctx, rinfo.pictureID)
 	if err != nil {
 		cancel()
 		var status int
@@ -142,13 +162,15 @@ func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w
 		errChan <- errorResponse{err, status}
 		return
 	}
+	rinfo.info = info
 
-	proxy, err := h.imagizerURL(innerCtx, version, parts)
+	proxy, err := h.imagizerURL(innerCtx, rinfo)
 	if err != nil {
 		cancel()
 		errChan <- errorResponse{err, http.StatusInternalServerError}
 		return
 	}
+
 	imagizerReq, err := http.NewRequest("GET", proxy.String(), nil)
 	if err != nil {
 		cancel()
@@ -192,6 +214,7 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	select {
 	case name := <-done:
+		cancel()
 		h.statsChan <- &stat{StatServedPicture, name}
 	case errResp := <-errChan:
 		if errResp.err == context.DeadlineExceeded || errResp.err == context.Canceled {
@@ -206,27 +229,14 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (h imagizerHandler) imagizerURL(ctx context.Context, version map[string]interface{}, parts map[string]string) (url.URL, error) {
+func (h imagizerHandler) imagizerURL(ctx context.Context, rinfo requestInfo) (url.URL, error) {
 	vals := url.Values{}
 	retURL := url.URL{}
 
-	pictureID, err := strconv.Atoi(parts["id"])
-	if err != nil {
-		return retURL, err
-	}
-
-	for key, val := range version {
+	for key, val := range rinfo.versionInfo {
 		if key == "watermark" && val == true {
-			isPhotogImage, err := h.isPhotographerImage(ctx, pictureID)
-			if err != nil {
-				return retURL, err
-			}
-
-			if isPhotogImage {
-				wm, err := h.getWatermarkInfo(ctx, pictureID, parts["env"])
-				if err != nil {
-					return retURL, err
-				}
+			if rinfo.isPhotographerImage() {
+				wm := rinfo.info.mark
 
 				vals.Add("mark", wm.logo.String)
 				if wm.scale.Valid {
@@ -269,7 +279,7 @@ func (h imagizerHandler) imagizerURL(ctx context.Context, version map[string]int
 		}
 	}
 
-	path, err := h.pathForImage(ctx, parts)
+	path, err := h.pathForImage(ctx, rinfo)
 	if err != nil {
 		return retURL, err
 	}
@@ -282,79 +292,46 @@ func (h imagizerHandler) imagizerURL(ctx context.Context, version map[string]int
 	return retURL, nil
 }
 
-func (h imagizerHandler) isPhotographerImage(ctx context.Context, id int) (bool, error) {
-	pic, err := h.db.loadPicture(ctx, id)
-	if err != nil {
-		return false, err
-	}
+func (h imagizerHandler) getCanonicalWatermark(rinfo requestInfo) watermark {
+	wm := rinfo.info.mark
 
-	ev, err := h.db.loadEvent(ctx, pic.eventID)
-	if err != nil {
-		return false, err
-	}
-
-	is := pic.userID == ev.ownerID
-	return is, nil
-}
-
-func (h imagizerHandler) getWatermarkInfo(ctx context.Context, id int, env string) (watermark, error) {
-	pic, err := h.db.loadPicture(ctx, id)
-	if err != nil {
-		return watermark{}, err
-	}
-	pi, err := h.db.loadPhotographerInfo(ctx, pic.userID)
-	if err != nil {
-		return watermark{}, err
-	}
-	wm, err := h.db.loadWatermark(ctx, pi.id)
-
-	if err != nil {
+	if !wm.logo.Valid {
 		wm = watermark{
 			logo:     newNullString("https://www.snapshots.com/images/icon.png"),
-			disabled: false,
+			disabled: newNullBool(false),
 			alpha:    newNullInt64(70),
 			scale:    newNullInt64(15),
 			offset:   newNullInt64(3),
 			position: newNullString("bottom,right"),
 		}
 
-		if pi.picture.Valid {
-			wm.logo = newNullString(fmt.Sprintf(watermarkPathFmt,
-				h.config.CDNHost, env, photographerInfoPathPart, pi.id, pi.picture.String))
+		if rinfo.info.oldMark.Valid {
+			wm.logo = newNullString(fmt.Sprintf(watermarkPathFmt, h.config.CDNHost,
+				rinfo.env, photographerInfoPathPart, rinfo.info.photographerInfoID.Int64,
+				rinfo.info.oldMark.String))
 		}
 	} else {
 		if wm.logo.Valid {
 			wm.logo = newNullString(fmt.Sprintf(watermarkPathFmt,
-				h.config.CDNHost, env, watermarkPathPart, wm.id, wm.logo.String))
+				h.config.CDNHost, rinfo.env, watermarkPathPart,
+				wm.id.Int64, wm.logo.String))
 		}
 	}
 
-	return wm, nil
+	return wm
 }
 
-func (h imagizerHandler) pathForImage(ctx context.Context, parts map[string]string) (string, error) {
-	pictureID, err := strconv.Atoi(parts["id"])
-	if err != nil {
-		return "", err
-	}
-
-	pic, err := h.db.loadPicture(ctx, pictureID)
-	if err != nil {
-		return "", err
-	}
-
-	env := parts["env"]
-
+func (h imagizerHandler) pathForImage(ctx context.Context, rinfo requestInfo) (string, error) {
 	var envAndUsername string
 
-	if env == "development" {
-		envAndUsername = fmt.Sprintf("%s/%s", env, parts["username"])
+	if rinfo.env == "development" {
+		envAndUsername = fmt.Sprintf("%s/%s", rinfo.env, rinfo.username)
 	} else {
-		envAndUsername = env
+		envAndUsername = rinfo.env
 	}
 
 	path := fmt.Sprintf(picturePathFmt,
-		BucketNames[env], envAndUsername, pictureID, pic.attachment)
+		BucketNames[rinfo.env], envAndUsername, rinfo.pictureID, rinfo.info.attachment)
 	return path, nil
 }
 

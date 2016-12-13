@@ -2,7 +2,8 @@ create table if not exists pictures(
   id integer primary key,
   user_id integer,
   event_id integer,
-  attachment varchar(255)
+  attachment varchar(255),
+  watermark_id integer
 );
 
 create table if not exists events(

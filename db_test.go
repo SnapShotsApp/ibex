@@ -28,6 +28,7 @@ func TestConnectionAndQuery(t *testing.T) {
 		testStruct := struct {
 			id, userID, eventID int
 			attachment          string
+			watermarkID         sql.NullInt64
 		}{}
 
 		rows, err := db.conn.Query("select * from pictures limit 1")
@@ -38,7 +39,10 @@ func TestConnectionAndQuery(t *testing.T) {
 		defer logger.CloseQuietly(rows)
 
 		for rows.Next() {
-			err = rows.Scan(&testStruct.id, &testStruct.userID, &testStruct.eventID, &testStruct.attachment)
+			err = rows.Scan(
+				&testStruct.id, &testStruct.userID, &testStruct.eventID,
+				&testStruct.attachment, &testStruct.watermarkID,
+			)
 			So(err, ShouldBeNil)
 		}
 
@@ -55,129 +59,19 @@ func TestConnectionAndQuery(t *testing.T) {
 	}))
 }
 
-func TestLoadEvent(t *testing.T) {
-	Convey("Loading events", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
+func TestLoadPictureInfo(t *testing.T) {
+	Convey("LoadPictureInfo", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, "logger", logger)
 
-		ev1, err := db.loadEvent(ctx, 1)
+		_, err := db.loadPictureInfo(ctx, 42)
+		So(err, ShouldHaveSameTypeAs, noRowsErr{})
+
+		info, err := db.loadPictureInfo(ctx, 1)
 		So(err, ShouldBeNil)
-		ev2, err := db.loadEvent(ctx, 2)
-		So(err, ShouldBeNil)
-		So(logger.log.Len(), ShouldEqual, 0)
 
-		cases := map[int]int{
-			ev1.ownerID: 1,
-			ev2.ownerID: 3,
-		}
-
-		for real, expected := range cases {
-			So(real, ShouldEqual, expected)
-		}
-	}))
-}
-
-func TestLoadPicture(t *testing.T) {
-	Convey("Loading pictures", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, "logger", logger)
-
-		pic1, err := db.loadPicture(ctx, 1)
-		So(err, ShouldBeNil)
-		pic2, err := db.loadPicture(ctx, 2)
-		So(err, ShouldBeNil)
-		So(logger.log.Len(), ShouldEqual, 0)
-
-		cases := map[interface{}]interface{}{
-			pic1.userID: 1,
-			pic2.userID: 2,
-
-			pic1.eventID: 1,
-			pic2.eventID: 1,
-
-			pic1.attachment: "test_pic.jpg",
-			pic2.attachment: "guest_test_pic.jpg",
-		}
-
-		for real, expected := range cases {
-			So(real, ShouldEqual, expected)
-		}
-	}))
-}
-
-func TestLoadPhotographerInfo(t *testing.T) {
-	Convey("Loading photographerInfos", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, "logger", logger)
-
-		pi1, err := db.loadPhotographerInfo(ctx, 1)
-		So(err, ShouldBeNil)
-		pi2, err := db.loadPhotographerInfo(ctx, 3)
-		So(err, ShouldBeNil)
-		pi3, err := db.loadPhotographerInfo(ctx, 4)
-		So(err, ShouldBeNil)
-		So(logger.log.Len(), ShouldEqual, 0)
-
-		cases := map[interface{}]interface{}{
-			pi1.id: 1,
-			pi2.id: 2,
-			pi3.id: 3,
-
-			pi1.picture.String: "test_watermark.jpg",
-			pi2.picture.String: "extra_test_watermark.jpg",
-			pi3.picture.Valid:  false,
-		}
-
-		for real, expected := range cases {
-			So(real, ShouldEqual, expected)
-		}
-	}))
-}
-
-func TestLoadWatermark(t *testing.T) {
-	Convey("Loading watermarks", t, withTestFixtures(func(config *Config, db *DB, logger testLogger) {
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, "logger", logger)
-
-		var wm watermark
-		var err error
-
-		Convey("Not found", func() {
-			wm, err = db.loadWatermark(ctx, 20)
-			So(err, ShouldNotBeNil)
-			So(wm.id, ShouldEqual, 0)
-		})
-
-		Convey("Should only return the default", func() {
-			wm, err = db.loadWatermark(ctx, 1)
-			So(err, ShouldBeNil)
-			So(wm.id, ShouldEqual, 1)
-			So(wm.logo.String, ShouldEqual, "test_watermark.jpg")
-			So(wm.alpha.Int64, ShouldEqual, 70)
-			So(wm.position.String, ShouldEqual, "bottom,left")
-		})
-
-		Convey("Should properly parse all data", func() {
-			wm, err = db.loadWatermark(ctx, 3)
-			So(err, ShouldBeNil)
-			So(wm.id, ShouldEqual, 4)
-			So(wm.logo.String, ShouldEqual, "test_watermark3.jpg")
-			So(wm.disabled, ShouldEqual, false)
-			So(wm.alpha.Int64, ShouldEqual, 20)
-			So(wm.scale.Int64, ShouldEqual, 75)
-			So(wm.offset.Int64, ShouldEqual, 0)
-			So(wm.position.String, ShouldEqual, "top,right")
-
-			wm, err = db.loadWatermark(ctx, 4)
-			So(err, ShouldBeNil)
-			So(wm.id, ShouldEqual, 5)
-			So(wm.logo.Valid, ShouldEqual, false)
-			So(wm.disabled, ShouldEqual, true)
-			So(wm.alpha.Valid, ShouldBeFalse)
-			So(wm.scale.Valid, ShouldBeFalse)
-			So(wm.offset.Valid, ShouldBeFalse)
-			So(wm.position.Valid, ShouldBeFalse)
-		})
+		So(info.ownerID, ShouldEqual, 1)
+		So(info.mark.id.Valid, ShouldBeFalse)
 	}))
 }
 

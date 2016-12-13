@@ -24,7 +24,22 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/nleof/goyesql"
+)
+
+const (
+	maxIdleConns    = 0
+	maxOpenConns    = 30
+	maxConnLifetime = 10 * time.Second
+
+	querySQL = `
+SELECT pictures.user_id, pictures.attachment, events.owner_id, photographer_infos.id,
+  photographer_infos.picture, watermarks.id, watermarks.disabled, watermarks.logo,
+  watermarks.alpha, watermarks.scale, watermarks.offset, watermarks.position
+FROM pictures
+LEFT JOIN watermarks ON watermarks.id = pictures.watermark_id
+LEFT JOIN photographer_infos ON photographer_infos.user_id = pictures.user_id
+JOIN events ON events.id = pictures.event_id
+WHERE pictures.id = $1;`
 )
 
 type noRowsErr struct {
@@ -42,37 +57,6 @@ func newNoRowsError(text string, a ...interface{}) noRowsErr {
 	return n
 }
 
-type picture struct {
-	userID     int
-	eventID    int
-	attachment string
-}
-
-type event struct {
-	ownerID int
-}
-
-type photographerInfo struct {
-	id      int
-	picture sql.NullString
-}
-
-type watermark struct {
-	id       int
-	logo     sql.NullString
-	disabled bool
-	alpha    sql.NullInt64
-	scale    sql.NullInt64
-	offset   sql.NullInt64
-	position sql.NullString
-}
-
-// DB encapsulates a DB connection + queries
-type DB struct {
-	conn    *sql.DB
-	queries goyesql.Queries
-}
-
 func newNullString(str string) sql.NullString {
 	ns := sql.NullString{Valid: true, String: str}
 
@@ -83,176 +67,101 @@ func newNullString(str string) sql.NullString {
 	return ns
 }
 
+func newNullBool(b bool) sql.NullBool {
+	return sql.NullBool{Valid: true, Bool: b}
+}
+
 func newNullInt64(i int64) sql.NullInt64 {
 	return sql.NullInt64{Valid: true, Int64: i}
 }
 
+type watermark struct {
+	id       sql.NullInt64
+	disabled sql.NullBool
+	logo     sql.NullString
+	alpha    sql.NullInt64
+	scale    sql.NullInt64
+	offset   sql.NullInt64
+	position sql.NullString
+}
+
+func (wm *watermark) mungePosition() {
+	if wm.position.Valid {
+		matched := regexp.MustCompile(`[- ]`).ReplaceAllString(wm.position.String, "")
+		matched = regexp.MustCompile(`\n`).ReplaceAllString(strings.TrimSpace(matched), ",")
+		wm.position.String = matched
+	}
+}
+
+// PictureInfo is the result of the picture query
+type pictureInfo struct {
+	userID             int
+	attachment         string
+	ownerID            int
+	photographerInfoID sql.NullInt64
+	oldMark            sql.NullString
+	mark               watermark
+}
+
+// DB encapsulates a DB connection + queries
+type DB struct {
+	conn *sql.DB
+}
+
 // NewDB connects to the database and loads the queries from YeSQL.
 func NewDB(c *Config) (*DB, error) {
-	conn, err := dbConnect(c)
+	conn, err := sql.Open("postgres", c.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}
+	conn.SetMaxIdleConns(maxIdleConns)
+	conn.SetMaxOpenConns(maxOpenConns)
+	conn.SetConnMaxLifetime(maxConnLifetime)
 
 	db := DB{
-		conn:    conn,
-		queries: loadYesql(),
+		conn: conn,
 	}
 
 	return &db, nil
 }
 
-func loadYesql() goyesql.Queries {
-	data := MustAsset("resources/pictures.sql")
-	return goyesql.MustParseBytes(data)
-}
-
-func dbConnect(c *Config) (*sql.DB, error) {
-	return sql.Open("postgres", c.DatabaseURL)
-}
-
-func (db *DB) loadPicture(ctx context.Context, id int) (picture, error) {
+func (db *DB) loadPictureInfo(ctx context.Context, id int) (pictureInfo, error) {
 	ctxTimeout, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	logger := ctxTimeout.Value("logger").(ILogger)
 
-	outChan := make(chan picture)
+	outChan := make(chan pictureInfo)
 	errChan := make(chan error)
 
 	go func() {
-		pic := picture{}
-		err := db.conn.QueryRow(db.queries["picture_by_id"], id).Scan(
-			&pic.userID, &pic.eventID, &pic.attachment)
+		info := pictureInfo{}
+
+		err := db.conn.QueryRow(querySQL, id).Scan(
+			&info.userID, &info.attachment, &info.ownerID, &info.photographerInfoID,
+			&info.oldMark, &info.mark.id, &info.mark.disabled, &info.mark.logo,
+			&info.mark.alpha, &info.mark.scale, &info.mark.offset, &info.mark.position,
+		)
 
 		switch {
 		case err == sql.ErrNoRows:
-			errChan <- newNoRowsError("No picture found with id %d", id)
+			err = newNoRowsError("No picture found with id %d", id)
+			fallthrough
 		case err != nil:
 			errChan <- err
 		default:
-			logger.Debug("Picture for id %d: %v", id, pic)
-			outChan <- pic
+			info.mark.mungePosition()
+			logger.Debug("Picture Info for %d: %v", id, info)
+			outChan <- info
 		}
 	}()
 
 	select {
-	case pic := <-outChan:
-		return pic, nil
+	case info := <-outChan:
+		return info, nil
 	case err := <-errChan:
-		return picture{}, err
+		return pictureInfo{}, err
 	case <-ctxTimeout.Done():
-		return picture{}, fmt.Errorf("context timeout: %v", ctxTimeout.Err())
-	}
-}
-
-func (db *DB) loadEvent(ctx context.Context, id int) (event, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	logger := timeoutCtx.Value("logger").(ILogger)
-
-	outChan := make(chan event)
-	errChan := make(chan error)
-
-	go func() {
-		ev := event{}
-
-		err := db.conn.QueryRow(db.queries["event_by_id"], id).Scan(&ev.ownerID)
-		switch {
-		case err == sql.ErrNoRows:
-			errChan <- newNoRowsError("No event found with id %d", id)
-		case err != nil:
-			errChan <- err
-		default:
-			logger.Debug("Event for id %d: %v", id, ev)
-			outChan <- ev
-		}
-	}()
-
-	select {
-	case ev := <-outChan:
-		return ev, nil
-	case err := <-errChan:
-		return event{}, err
-	case <-timeoutCtx.Done():
-		return event{}, fmt.Errorf("context timeout: %v", timeoutCtx.Err())
-	}
-}
-
-func (db *DB) loadPhotographerInfo(ctx context.Context, userID int) (photographerInfo, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	logger := timeoutCtx.Value("logger").(ILogger)
-
-	outChan := make(chan photographerInfo)
-	errChan := make(chan error)
-
-	go func() {
-		pi := photographerInfo{}
-
-		err := db.conn.QueryRow(db.queries["photographer_info_by_user_id"], userID).Scan(
-			&pi.id, &pi.picture)
-		switch {
-		case err == sql.ErrNoRows:
-			errChan <- newNoRowsError("No photographer info found for user id %d", userID)
-		case err != nil:
-			errChan <- err
-		default:
-			logger.Debug("PhotographerInfo for user ID %d: %v", userID, pi)
-			outChan <- pi
-		}
-	}()
-
-	select {
-	case pi := <-outChan:
-		return pi, nil
-	case err := <-errChan:
-		return photographerInfo{}, err
-	case <-timeoutCtx.Done():
-		return photographerInfo{}, fmt.Errorf("context timeout: %v", timeoutCtx.Err())
-	}
-}
-
-func (db *DB) loadWatermark(ctx context.Context, photographerInfoID int) (watermark, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	logger := timeoutCtx.Value("logger").(ILogger)
-
-	outChan := make(chan watermark)
-	errChan := make(chan error)
-
-	go func() {
-		wm := watermark{}
-
-		err := db.conn.QueryRow(db.queries["watermark_by_photographer_info_id"], photographerInfoID).Scan(
-			&wm.id, &wm.logo, &wm.disabled, &wm.alpha, &wm.scale, &wm.offset, &wm.position)
-
-		switch {
-		case err == sql.ErrNoRows:
-			errChan <- newNoRowsError("No watermark found for photographerInfo %d", photographerInfoID)
-		case err != nil:
-			errChan <- err
-		default:
-			if wm.position.Valid {
-				matched := regexp.MustCompile(`[- ]`).ReplaceAllString(wm.position.String, "")
-				matched = regexp.MustCompile(`\n`).ReplaceAllString(strings.TrimSpace(matched), ",")
-				wm.position.String = matched
-			}
-
-			logger.Debug("Watermark for photographer ID %d: %v", photographerInfoID, wm)
-			outChan <- wm
-		}
-	}()
-
-	select {
-	case wm := <-outChan:
-		return wm, nil
-	case err := <-errChan:
-		return watermark{}, err
-	case <-timeoutCtx.Done():
-		return watermark{}, fmt.Errorf("context timeout: %v", timeoutCtx.Err())
+		return pictureInfo{}, fmt.Errorf("context timeout: %v", ctxTimeout.Err())
 	}
 }
