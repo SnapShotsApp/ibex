@@ -151,7 +151,7 @@ func (db *DB) loadPictureInfo(ctx context.Context, id int) (pictureInfo, error) 
 			errChan <- err
 		default:
 			info.mark.mungePosition()
-			logger.Debug("Picture Info for %d: %v", id, info)
+			logger.Debug("Picture Info for %d: %+v", id, info)
 			outChan <- info
 		}
 	}()
@@ -162,6 +162,6 @@ func (db *DB) loadPictureInfo(ctx context.Context, id int) (pictureInfo, error) 
 	case err := <-errChan:
 		return pictureInfo{}, err
 	case <-ctxTimeout.Done():
-		return pictureInfo{}, fmt.Errorf("context timeout: %v", ctxTimeout.Err())
+		return pictureInfo{}, fmt.Errorf("context timeout: %+v", ctxTimeout.Err())
 	}
 }

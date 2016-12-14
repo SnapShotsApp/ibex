@@ -59,7 +59,7 @@ type stat struct {
 	Payload string
 }
 
-// Stats serves as a receptical of server statistics
+// Stats serves as a receiver of server statistics
 type Stats struct {
 	Started        time.Time         `json:"started"`
 	BadRequests    uint64            `json:"bad_requests"`

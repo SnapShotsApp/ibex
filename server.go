@@ -24,6 +24,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/satori/go.uuid"
 )
 
 const re = `(?i)/?uploads/(?P<env>\w+)/(?P<username>\w+)?/?picture/attachment/(?P<id>\d+)/(?P<name>\w+)(?:/[a-zA-Z0-9_-]+)?$`
@@ -61,7 +63,7 @@ func Start(c *Config, logger ILogger, statsChan chan *stat) {
 		db:              db,
 		logger:          logger,
 		statsChan:       statsChan,
-		responseTimeout: 10 * time.Second,
+		responseTimeout: 20 * time.Second,
 	}
 
 	s := &http.Server{
@@ -114,6 +116,7 @@ func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w
 	defer cancel()
 
 	logger := innerCtx.Value("logger").(ILogger)
+	logger.Info("START [GET] %s", req.URL.Path)
 
 	parts, err := validateAndExtractPath(req)
 	if err != nil {
@@ -121,7 +124,7 @@ func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w
 		errChan <- errorResponse{err, http.StatusNotFound}
 		return
 	}
-	logger.Debug("URL Parts: %v", parts)
+	logger.Debug("URL Parts: %+v", parts)
 
 	rinfo := requestInfo{
 		env:         parts["env"],
@@ -135,7 +138,7 @@ func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w
 		errChan <- errorResponse{fmt.Errorf("Version not found with name %s", parts["name"]), http.StatusNotFound}
 		return
 	}
-	logger.Debug("Version found: %v", version)
+	logger.Debug("Version found: %+v", version)
 
 	rinfo.versionInfo = version
 
@@ -170,6 +173,7 @@ func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w
 		errChan <- errorResponse{err, http.StatusInternalServerError}
 		return
 	}
+	logger.Debug("Imagizer URL: %+v", proxy)
 
 	imagizerReq, err := http.NewRequest("GET", proxy.String(), nil)
 	if err != nil {
@@ -185,7 +189,7 @@ func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w
 		errChan <- errorResponse{err, http.StatusInternalServerError}
 		return
 	}
-	logger.Debug("Imagizer response: %v", resp)
+	logger.Debug("Imagizer response: %+v", resp)
 
 	_, err = io.Copy(w, resp.Body)
 	if err != nil {
@@ -194,12 +198,17 @@ func (h imagizerHandler) handleRequest(ctx context.Context, req *http.Request, w
 		return
 	}
 
+	started := innerCtx.Value("startTime").(time.Time)
+	logger.Info(fmt.Sprintf("FINISH [GET] %s (%s)", req.URL.Path, time.Since(started)))
 	done <- parts["name"]
 }
 
 func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), h.responseTimeout)
-	ctx = context.WithValue(ctx, "logger", h.logger)
+	innerLogger := h.logger.Sub()
+	innerLogger.SetPrefix(fmt.Sprintf("[%s]", uuid.NewV4().String()))
+	ctx = context.WithValue(ctx, "logger", innerLogger)
+	ctx = context.WithValue(ctx, "startTime", time.Now())
 	defer cancel()
 	req = req.WithContext(ctx)
 
@@ -207,7 +216,8 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	errChan := make(chan errorResponse)
 	go h.handleRequest(ctx, req, w, done, errChan)
 
-	handleTimeout := func() {
+	handleTimeout := func(err string) {
+		innerLogger.Warn("timeout: %s", err)
 		http.Error(w, "timeout", http.StatusGatewayTimeout)
 		h.statsChan <- &stat{StatTimeout, ""}
 	}
@@ -218,14 +228,14 @@ func (h imagizerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.statsChan <- &stat{StatServedPicture, name}
 	case errResp := <-errChan:
 		if errResp.err == context.DeadlineExceeded || errResp.err == context.Canceled {
-			handleTimeout()
+			handleTimeout(errResp.err.Error())
 			return
 		}
 
 		http.Error(w, errResp.err.Error(), errResp.status)
 		h.statsChan <- &stat{StatBadRequest, ""}
 	case <-ctx.Done():
-		handleTimeout()
+		handleTimeout(ctx.Err().Error())
 	}
 }
 
@@ -236,7 +246,7 @@ func (h imagizerHandler) imagizerURL(ctx context.Context, rinfo requestInfo) (ur
 	for key, val := range rinfo.versionInfo {
 		if key == "watermark" && val == true {
 			if rinfo.isPhotographerImage() {
-				wm := rinfo.info.mark
+				wm := h.getCanonicalWatermark(rinfo)
 
 				vals.Add("mark", wm.logo.String)
 				if wm.scale.Valid {
@@ -267,7 +277,7 @@ func (h imagizerHandler) imagizerURL(ctx context.Context, rinfo requestInfo) (ur
 
 		switch val := val.(type) {
 		default:
-			return retURL, fmt.Errorf("Unexpected type %T for %v", val, val)
+			return retURL, fmt.Errorf("Unexpected type %T for %+v", val, val)
 		case string:
 			vals.Add(key, val)
 		case int:

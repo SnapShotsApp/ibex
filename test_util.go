@@ -27,6 +27,16 @@ type testLogger struct {
 	log    bytes.Buffer
 }
 
+func (t testLogger) SetPrefix(string) {}
+
+func (t testLogger) GetPrefix(bool) string {
+	return "test logger"
+}
+
+func (t testLogger) Sub() ILogger {
+	return t
+}
+
 func (t testLogger) Info(format string, args ...interface{}) {
 	toWrite := fmt.Sprintf("[INFO] "+format+"\n", args)
 	if t.output {
