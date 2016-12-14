@@ -2,16 +2,12 @@
 	"ImportPath": "github.com/SnapShotsApp/ibex",
 	"GoVersion": "go1.7",
 	"GodepVersion": "v75",
+	"Packages": [
+		".",
+		"github.com/lib/pq",
+		"github.com/satori/go.uuid"
+	],
 	"Deps": [
-		{
-			"ImportPath": "github.com/gopherjs/gopherjs/js",
-			"Rev": "e34a5cd6a1bc7c4fde759f2d3039852fc68b5fcc"
-		},
-		{
-			"ImportPath": "github.com/jtolds/gls",
-			"Comment": "v4.2.0",
-			"Rev": "8ddce2a84170772b95dd5d576c48d517b22cac63"
-		},
 		{
 			"ImportPath": "github.com/lib/pq",
 			"Comment": "go1.0-cutoff-127-gd8eeeb8",
@@ -23,34 +19,9 @@
 			"Rev": "d8eeeb8bae8896dd8e1b7e514ab0d396c4f12a1b"
 		},
 		{
-			"ImportPath": "github.com/smartystreets/assertions",
-			"Comment": "1.6.0-13-ge60cfa7",
-			"Rev": "e60cfa771e3f4d18723a4119f1833898c9c62066"
-		},
-		{
-			"ImportPath": "github.com/smartystreets/assertions/internal/go-render/render",
-			"Comment": "1.6.0-13-ge60cfa7",
-			"Rev": "e60cfa771e3f4d18723a4119f1833898c9c62066"
-		},
-		{
-			"ImportPath": "github.com/smartystreets/assertions/internal/oglematchers",
-			"Comment": "1.6.0-13-ge60cfa7",
-			"Rev": "e60cfa771e3f4d18723a4119f1833898c9c62066"
-		},
-		{
-			"ImportPath": "github.com/smartystreets/goconvey/convey",
-			"Comment": "1.6.2-15-g3c25728",
-			"Rev": "3c2572876754c4669ae7417b219f0b30a29b32c7"
-		},
-		{
-			"ImportPath": "github.com/smartystreets/goconvey/convey/gotest",
-			"Comment": "1.6.2-15-g3c25728",
-			"Rev": "3c2572876754c4669ae7417b219f0b30a29b32c7"
-		},
-		{
-			"ImportPath": "github.com/smartystreets/goconvey/convey/reporting",
-			"Comment": "1.6.2-15-g3c25728",
-			"Rev": "3c2572876754c4669ae7417b219f0b30a29b32c7"
+			"ImportPath": "github.com/satori/go.uuid",
+			"Comment": "v1.1.0-6-gb061729",
+			"Rev": "b061729afc07e77a8aa4fad0a2fd840958f1942a"
 		}
 	]
 }
